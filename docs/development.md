@@ -89,7 +89,7 @@ MIOCLI_TEST_ARCHIVE=/absolute/path/to/pinned-mihomo.gz \
 go test -race -count=1 -run '^TestIsolatedS3Bootstrap$' ./internal/core
 ```
 
-## 国内 S3 发布
+## S3 镜像发布
 
 标签构建仍创建 GitHub 草稿 Release。正式发布稳定版本后，`publish-s3.yml` 在受保护的 `s3-release` 环境同步已经生成的 Release 文件，不重新构建二进制。也可通过 workflow_dispatch 指定已正式发布的稳定标签重试；旧版本不会降级稳定索引。
 
@@ -124,7 +124,7 @@ mihomo/releases/vA.B.C/              # 六个平台原始包、LICENSE 和 SOURC
 
 升级 Mihomo 时修改 `internal/core/mihomo-release.json`：确认官方稳定版本、全部六个平台文件名、原始压缩包 SHA-256 和许可证；优先可移植 amd64 baseline。更新中英文 README 的固定版本说明，执行映射/下载测试和隔离实例兼容测试。不要仅修改版本字符串或在客户端查询 latest。
 
-Mihomo 是独立的 GPL-3.0 程序，镜像保留原始包，附带上游许可证和 `SOURCE.txt` 对应版本源码下载指引；维护者需保持所指源码可获取。该指引不意味着源码或配置资源也已镜像到国内 S3。
+Mihomo 是独立的 GPL-3.0 程序，镜像保留原始包，附带上游许可证和 `SOURCE.txt` 对应版本源码下载指引；维护者需保持所指源码可获取。该指引不意味着源码或配置资源也已镜像到 S3。
 
 GitHub 版本查询限制 15 秒，包和校验文件各限制 30 秒；S3 元数据/校验文件限制 60 秒、包限制 180 秒。POSIX/Go 另有连接限制，PowerShell 7.4+ 分别设置连接和操作超时；旧版 PowerShell 使用现有 `TimeoutSec` 总请求限制，不要求安装新版 PowerShell。
 
