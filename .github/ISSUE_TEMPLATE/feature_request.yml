@@ -1,0 +1,44 @@
+name: 功能请求 / Feature request
+description: 提出 miocli 的改进建议 / Suggest an improvement to miocli.
+body:
+  - type: markdown
+    attributes:
+      value: |
+        请先搜索已有 Issue，并阅读[贡献指南](https://github.com/mayfly-tech/miocli/blob/main/CONTRIBUTING.md)。较大的行为变更请先在 Issue 中讨论。
+        Search existing issues first and read the [contributing guide](https://github.com/mayfly-tech/miocli/blob/main/CONTRIBUTING_EN.md). Discuss larger behavior changes in an issue first.
+
+        安全漏洞请通过 GitHub Security Advisories 私下报告。不要提交密钥、订阅地址、私有配置（包括存储配置）或真实流量数据。
+        Report vulnerabilities privately through GitHub Security Advisories. Do not include secrets, subscription URLs, private configuration (including storage settings) or real traffic data.
+  - type: textarea
+    id: problem
+    attributes:
+      label: 要解决的问题 / Problem to solve
+      description: 描述使用场景、当前限制和受影响的用户。 / Describe the use case, current limitation and affected users.
+    validations:
+      required: true
+  - type: textarea
+    id: solution
+    attributes:
+      label: 建议方案 / Proposed solution
+      description: 描述期望的行为或交互。 / Describe the desired behavior or interaction.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: 替代方案 / Alternatives considered
+      description: 可选；描述考虑过的其他方案或当前绕行方法。 / Optional; describe other solutions considered or current workarounds.
+  - type: textarea
+    id: context
+    attributes:
+      label: 补充背景 / Additional context
+      description: 可选；示例、截图和链接均须脱敏。 / Optional; redact examples, screenshots and links.
+  - type: checkboxes
+    id: confirmations
+    attributes:
+      label: 提交确认 / Submission checklist
+      options:
+        - label: 我已搜索已有 Issue，未找到相同请求。 / I searched existing issues and found no duplicate request.
+          required: true
+        - label: 我已检查提交内容并删除敏感信息。 / I checked the submission and removed sensitive information.
+          required: true

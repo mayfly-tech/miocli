@@ -4,6 +4,16 @@
 
 欢迎提交 Issue 和 Pull Request。较大的行为变更请先通过 Issue 讨论。
 
+## Issue 与 Pull Request
+
+请先搜索已有 Issue，避免重复报告。新 Issue 使用 [Bug 报告表单](.github/ISSUE_TEMPLATE/bug_report.yml)或[功能请求表单](.github/ISSUE_TEMPLATE/feature_request.yml)，均提供中英双语提示；不开放空白 Issue。
+
+Bug 报告需填写 miocli/Mihomo 版本、系统与架构、连接模式、最小复现步骤、预期和实际行为。尚未安装时填写目标 miocli 版本；Mihomo 版本无法获取时可填“未知”或“不适用”。日志和截图为可选内容，提交前必须脱敏。功能请求请说明要解决的问题、建议方案及考虑过的替代方案（如有）。
+
+创建 PR 时填写自动加载的 [PR 模板](.github/pull_request_template.md)，说明问题、变更和实际验证命令及结果；关联 Issue 时可使用 `Closes #123`，但并非每个 PR 都需要 Issue。未执行或不适用的检查需说明理由，纯文档或模板改动可注明 Go 测试不适用。集成测试只能对专用的一次性 Mihomo 实例运行，不得连接日常实例。
+
+公开的文字、日志、截图和配置片段不得包含控制器密钥、订阅地址、私有配置（包括存储配置）或真实用户流量数据；不要直接粘贴完整配置。安全漏洞遵循下方的私下报告流程，不使用公开 Bug 表单披露可利用细节。
+
 ## 开发环境
 
 - Go 1.24 或更新版本。

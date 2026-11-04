@@ -1,0 +1,94 @@
+name: Bug 报告 / Bug report
+description: 报告 miocli 的可复现问题 / Report a reproducible miocli problem.
+body:
+  - type: markdown
+    attributes:
+      value: |
+        请先搜索已有 Issue，并阅读[贡献指南](https://github.com/mayfly-tech/miocli/blob/main/CONTRIBUTING.md)。
+        Search existing issues first and read the [contributing guide](https://github.com/mayfly-tech/miocli/blob/main/CONTRIBUTING_EN.md).
+
+        安全漏洞请通过 GitHub Security Advisories 私下报告，不要在公开 Issue 中披露可利用细节。
+        Report vulnerabilities privately through GitHub Security Advisories, not with exploitable details in a public issue.
+
+        提交前请删除密钥、订阅地址、私有配置（包括存储配置）和真实流量数据。不要粘贴完整配置。
+        Remove secrets, subscription URLs, private configuration (including storage settings) and real traffic data. Do not paste full configurations.
+  - type: textarea
+    id: summary
+    attributes:
+      label: 问题概述 / Problem summary
+      description: 简要描述遇到的问题。 / Briefly describe the problem.
+    validations:
+      required: true
+  - type: input
+    id: miocli-version
+    attributes:
+      label: miocli 版本 / miocli version
+      description: 填写 `miocli version` 输出；尚未安装时填写目标版本。 / Use `miocli version` output, or the target version if not yet installed.
+      placeholder: vX.Y.Z / commit
+    validations:
+      required: true
+  - type: input
+    id: mihomo-version
+    attributes:
+      label: Mihomo 版本 / Mihomo version
+      description: 无法获取时填写“未知”或“不适用”。 / Enter "unknown" or "not applicable" if unavailable.
+      placeholder: vX.Y.Z / unknown / not applicable
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: 系统与架构 / OS and architecture
+      description: 包含系统版本、CPU 架构；界面问题请补充终端名称与版本。 / Include OS version and CPU architecture; for UI issues, also include terminal name and version.
+      placeholder: macOS 15, arm64, Terminal
+    validations:
+      required: true
+  - type: dropdown
+    id: connection-mode
+    attributes:
+      label: 连接模式 / Connection mode
+      options:
+        - 已有内核 / Existing core (connect or dev)
+        - 托管内核 / Managed core
+        - 安装或连接之前 / Before installation or connection
+        - 不确定 / Unsure
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: 复现步骤 / Steps to reproduce
+      description: 提供最小复现步骤与使用的命令或按键，不包含敏感信息。 / Provide minimal steps and commands or keys used, without sensitive information.
+      placeholder: |
+        1.
+        2.
+        3.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: 预期行为 / Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: 实际行为 / Actual behavior
+      description: 包含错误信息（如有），先脱敏。 / Include error messages if any, after redaction.
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: 日志、截图与补充背景 / Logs, screenshots and additional context
+      description: 可选；仅提供与问题相关的脱敏内容。 / Optional; include only relevant, redacted information.
+  - type: checkboxes
+    id: confirmations
+    attributes:
+      label: 提交确认 / Submission checklist
+      options:
+        - label: 我已搜索已有 Issue，未找到相同问题。 / I searched existing issues and found no duplicate.
+          required: true
+        - label: 我已检查所有文字、日志和截图，删除敏感信息。 / I checked all text, logs and screenshots and removed sensitive information.
+          required: true

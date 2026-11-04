@@ -4,6 +4,16 @@ Contributions to `miocli` are welcome. Discuss larger behavior changes in an iss
 
 简体中文 · [贡献指南](CONTRIBUTING.md) · [README](README_EN.md)
 
+## Issues and pull requests
+
+Search existing issues first to avoid duplicates. Use the [bug report form](.github/ISSUE_TEMPLATE/bug_report.yml) or [feature request form](.github/ISSUE_TEMPLATE/feature_request.yml), both with Chinese and English prompts. Blank issues are disabled.
+
+Bug reports require miocli/Mihomo versions, OS and architecture, connection mode, minimal reproduction steps, and expected and actual behavior. If miocli is not yet installed, enter the target version; the Mihomo version may be "unknown" or "not applicable" if unavailable. Logs and screenshots are optional and must be redacted. Feature requests should explain the problem, proposed solution and any alternatives considered.
+
+Complete the automatically loaded [PR template](.github/pull_request_template.md) with the problem, changes, and actual validation commands and results. Use `Closes #123` for related issues when appropriate; not every PR needs an issue. Explain skipped or inapplicable checks; Go tests may be marked not applicable for documentation/template-only changes. Run integration tests only against a dedicated disposable Mihomo instance, never your daily instance.
+
+Public text, logs, screenshots and configuration snippets must not contain controller secrets, subscription URLs, private configuration (including storage settings) or real user traffic data. Do not paste full configurations. Follow the private security reporting process below rather than disclosing exploitable details in the public bug form.
+
 ## Development setup
 
 - Go 1.24 or newer.
