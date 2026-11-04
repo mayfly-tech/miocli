@@ -84,33 +84,32 @@ go test -count=1 -run '^TestIsolated' ./internal/mihomo ./internal/profile
 
 这些测试不读取用户配置、不连接日常实例。测试档案索引、事务日志和配置可能含敏感信息；样例、截图和日志须使用非敏感数据。
 
-`TestIsolatedS3Bootstrap` 使用本机平台的固定版本压缩包和本地 HTTPS 镜像，模拟 GitHub 不可达，从无内核目录下载、校验并启动真实子进程后清理：
+`TestIsolatedPinnedBootstrap` 使用本机平台的固定版本压缩包和本地 HTTPS 测试服务器，从无内核目录下载、校验并启动真实子进程后清理：
 
 ```sh
 MIOCLI_TEST_ARCHIVE=/absolute/path/to/pinned-mihomo.gz \
-go test -race -count=1 -run '^TestIsolatedS3Bootstrap$' ./internal/core
+go test -race -count=1 -run '^TestIsolatedPinnedBootstrap$' ./internal/core
 ```
 
 ## S3 镜像发布
 
 发布包按目标平台导出第三方许可证，不跳过 Windows 专用依赖。`go-localereader` 固定在 `v0.0.2-0.20220822084737-6bae6c923850`：该提交相对 `v0.0.1` 仅补充上游 LICENSE，无代码变更，避免 Windows 打包时因缺少许可证失败。
 
-标签构建仍创建 GitHub 草稿 Release。正式发布稳定版本后，`publish-s3.yml` 在受保护的 `s3-release` 环境同步已经生成的 Release 文件，不重新构建二进制。也可通过 workflow_dispatch 指定已正式发布的稳定标签重试；旧版本不会降级稳定索引。
+`release.yml` 在标签构建成功并创建 GitHub 草稿 Release 后，直接通过 `TencentCloud/cos-action` 上传已有构建产物，不重新构建。仅稳定标签上传 COS；S3 在 GitHub Release 正式发布前即可上线。上传失败可重跑 Release 工作流的失败 job，不再使用独立发布工作流或 Python 发布脚本。
 
-环境配置统一使用 GitHub Actions Secrets，在 `Settings → Environments → s3-release → Environment secrets` 中设置以下项目；工作流不读取同名 Variables。`S3_KEY_PREFIX` 和 `S3_REGION` 可不设置，其余项目必填。不要将凭据写入源码或客户端。
+环境配置统一使用 GitHub Actions Secrets，在 `Settings → Environments → s3-release → Environment secrets` 中设置以下项目；工作流不读取同名 Variables。仅 `S3_KEY_PREFIX` 可不设置，其余项目必填。不要将凭据写入源码或客户端。
 
 公开文档只记录配置项名称和通用发布约定，不记录实际存储 API 地址、桶名、账号标识、区域部署、凭据值或内部网络信息。实际配置通过 GitHub 发布环境管理；Issue、PR、日志和截图也需脱敏。下文使用 `example.com` 示例域名，不代表可用下载源。
 
 | 类型 | 名称 | 用途 |
 | --- | --- | --- |
-| Secret | `S3_ENDPOINT` | S3 兼容 API 的 HTTPS endpoint，不是公开下载 URL |
-| Secret | `S3_BUCKET` | 目标桶 |
+| Secret | `S3_BUCKET` | COS 完整存储桶名，包含 APPID 后缀 |
 | Secret | `S3_KEY_PREFIX` | 可选对象键前缀，与公开根路径对应 |
-| Secret | `S3_REGION` | 可选区域，默认 `us-east-1` |
+| Secret | `S3_REGION` | COS 区域标识，与存储桶所属区域一致 |
 | Secret | `S3_ACCESS_KEY_ID` | 仅 CI 上传使用 |
 | Secret | `S3_SECRET_ACCESS_KEY` | 仅 CI 上传使用 |
 
-将桶/前缀配置为公开只读下载，使对象 `miocli/...` 和 `mihomo/...` 映射到项目公开下载根地址（示例：`https://downloads.example.com/public/`）。实际公开根地址需与安装器、内核下载及发布脚本中的地址一致，不能用内部存储 API 地址替代。CI 的 GetObject/PutObject 权限限制到分发前缀，不需要删除权限；同时提供桶级 ListBucket 权限，使不存在对象的 Head 请求返回 404 而不是 403（建议使用独立发布桶）。API 需支持条件 Put（`If-None-Match` / `If-Match`）；不支持时发布明确失败，不退化为无条件覆盖。保护发布环境并限制可发布的标签。
+Action 使用 COS 原生 SDK，不再需要 `S3_ENDPOINT` 或 AWS CLI。将桶/前缀配置为公开只读下载，使对象 `miocli/...` 映射到安装器的公开下载根地址（示例：`https://downloads.example.com/public/` 对应前缀 `public`）。CI 上传身份需要该前缀的 `cos:PutObject` 权限；`clean: false` 不删除历史文件，不需要 ListBucket 或删除权限。保护发布环境并限制可发布的标签。
 
 布局：
 
@@ -119,20 +118,17 @@ miocli/install.sh                    # 稳定脚本入口
 miocli/install.ps1
 miocli/stable.txt                    # 单行稳定版本，最后更新
 miocli/releases/vX.Y.Z/              # 两份脚本、六个平台包及 SHA-256
-mihomo/releases/vA.B.C/              # 六个平台原始包、LICENSE 和 SOURCE.txt
 ```
 
-先验证全部本地包和官方 Mihomo 摘要，再上传不可变对象，通过公开 URL 校验后才提升稳定入口。版本目录要求字节不可变，重跑只复用一致对象；冲突、403、上传或公开校验失败均报错。稳定索引使用条件更新，工作流串行执行。脚本别名保持版本无关，避免多对象更新非事务性造成不兼容。公开域名应尊重 Cache-Control，稳定入口不得长期缓存。
-
-提升索引后的最终公开校验失败时，索引可能已更新；流程报错而不宣称成功。修复公开访问或缓存后重跑，同版本重跑也会验证稳定入口。
+先校验构建产物 SHA-256，再上传版本包与安装脚本，成功后最后单独上传 `stable.txt`。工作流串行执行，但上传不是事务，不提供条件写入、冲突检查、自动公网校验或版本防降级；失败可能留下部分文件，重跑旧标签可能覆盖 stable。不要重跑旧标签来更新稳定入口。Action 不设置 Cache-Control，需在 COS/CDN 中避免长期缓存安装脚本和稳定索引。
 
 升级 Mihomo 时修改 `internal/core/mihomo-release.json`：确认官方稳定版本、全部六个平台文件名、原始压缩包 SHA-256 和许可证；优先可移植 amd64 baseline。更新中英文 README 的固定版本说明，执行映射/下载测试和隔离实例兼容测试。不要仅修改版本字符串或在客户端查询 latest。
 
-Mihomo 是独立的 GPL-3.0 程序，镜像保留原始包，附带上游许可证和 `SOURCE.txt` 对应版本源码下载指引；维护者需保持所指源码可获取。该指引不意味着源码或配置资源也已镜像到 S3。
+Mihomo 是独立的 GPL-3.0 程序，不由本工作流镜像或上传。客户端仅从官方 GitHub Release 下载并校验固定版本；GitHub 不可达时需在 setup 中指定已有本地内核。
 
 GitHub 版本查询限制 15 秒，包和校验文件各限制 30 秒；S3 元数据/校验文件限制 60 秒、包限制 180 秒。POSIX/Go 另有连接限制，PowerShell 7.4+ 分别设置连接和操作超时；旧版 PowerShell 使用现有 `TimeoutSec` 总请求限制，不要求安装新版 PowerShell。
 
-验收须使用隔离用户目录、本地不依赖外部规则/Geo/providers 的最小配置：GitHub 不可达且没有内核时，从 S3 获得脚本，安装 miocli，再在 setup 中确认 S3 内核兜底，检查版本和 SHA-256，最后清理自有子进程。首次真实验收需要配置 CI 存储凭据并正式发布；测试通过不等于 S3 已部署。
+验收须使用隔离用户目录：从 S3 获得脚本并安装 miocli，检查版本和 SHA-256。Mihomo 需从 GitHub 下载或复用已有本地内核。首次真实验收需要配置 CI 存储凭据并成功运行稳定标签的 Release 工作流；测试通过不等于 S3 已部署。
 
 ## 卸载与清理
 

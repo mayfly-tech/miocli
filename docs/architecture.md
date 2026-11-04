@@ -38,9 +38,9 @@ cmd/miocli
 
 - POSIX 安装器读取 GitHub latest 的规范版本重定向（不新增 JSON 解析依赖）；PowerShell 使用 GitHub Release API。版本查询的网络/HTTP 失败才改读 S3 `miocli/stable.txt`。
 - 发布包与校验文件作为同源下载对处理，GitHub 下载失败时从 S3 重新下载同版本的两份文件；校验失败不回退。S3 不允许重定向。
-- `internal/core/mihomo-release.json` 是内核版本、六个平台文件名和 SHA-256 的唯一清单，Go 内嵌、发布脚本共用。Mihomo 下载仅接受官方 GitHub 与指定 S3 命名空间，并限制重定向、请求时限和响应体大小。
-- 核心下载可回退错误与校验/策略错误分离。setup 显示固定版本、回退原因和最终来源，不改变确认或进程所有权规则。
-- 正式 Release 触发 S3 发布；先上传不可变版本对象并通过公开 HTTPS 校验，再更新脚本入口和稳定索引。重跑校验已存在对象，不覆盖冲突内容或将 stable 降级。
+- `internal/core/mihomo-release.json` 是内核版本、六个平台文件名和 SHA-256 的唯一清单，由 Go 内嵌。Mihomo 下载仅接受官方 GitHub，并限制重定向、请求时限和响应体大小。
+- 核心下载区分网络错误与校验/策略错误。setup 显示固定版本和验证来源，不改变确认或进程所有权规则；不再使用 Mihomo S3 兜底。
+- 稳定标签构建创建草稿 Release 后，在同一工作流通过 COS Action 上传 miocli 包和脚本，最后上传 stable。保留历史对象，但无冲突检查或防降级，重跑旧标签可能覆盖稳定入口。
 
 分发下载与控制 API 的网络策略不同；控制 API 仍不使用环境代理。分发使用 HTTPS；同源发布包校验不替代独立签名，当前不包含包签名。
 

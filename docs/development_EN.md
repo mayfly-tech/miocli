@@ -84,53 +84,49 @@ go test -count=1 -run '^TestIsolated' ./internal/mihomo ./internal/profile
 
 These tests do not read user settings or connect to a regular instance. Profile indexes, transaction logs and configurations may contain sensitive information; use non-sensitive data in samples, screenshots and logs.
 
-`TestIsolatedS3Bootstrap` uses the pinned archive for the native platform and a local HTTPS mirror to simulate unreachable GitHub, install into an empty core directory, verify the binary, start a real child and clean it up:
+`TestIsolatedPinnedBootstrap` uses the pinned archive for the native platform and a local HTTPS test server to install into an empty core directory, verify the binary, start a real child and clean it up:
 
 ```sh
 MIOCLI_TEST_ARCHIVE=/absolute/path/to/pinned-mihomo.gz \
-go test -race -count=1 -run '^TestIsolatedS3Bootstrap$' ./internal/core
+go test -race -count=1 -run '^TestIsolatedPinnedBootstrap$' ./internal/core
 ```
 
 ## Domestic S3 publication
 
 Release archives export third-party licenses for each target platform without skipping Windows-only dependencies. `go-localereader` is pinned to `v0.0.2-0.20220822084737-6bae6c923850`: compared with `v0.0.1`, this commit only adds the upstream LICENSE with no code changes, preventing Windows packaging failures due to a missing license.
 
-Tag builds still create draft GitHub Releases. Publishing a stable Release triggers `publish-s3.yml` in the protected `s3-release` environment, synchronizing existing Release files without rebuilding binaries. A workflow_dispatch run can retry a previously published stable tag; older tags never downgrade the stable index.
+After a tag build succeeds and creates a draft GitHub Release, `release.yml` uploads existing build artifacts directly using `TencentCloud/cos-action`, without rebuilding. Only stable tags upload to COS; S3 becomes available before the GitHub Release is formally published. Retry failed upload jobs in the Release workflow. There is no separate publication workflow or Python publisher.
 
-Use GitHub Actions Secrets for all environment configuration. Set the following under `Settings → Environments → s3-release → Environment secrets`; the workflow does not read Variables with the same names. `S3_KEY_PREFIX` and `S3_REGION` are optional; all other entries are required. Never place credentials in source or clients.
+Use GitHub Actions Secrets for all environment configuration. Set the following under `Settings → Environments → s3-release → Environment secrets`; the workflow does not read Variables with the same names. Only `S3_KEY_PREFIX` is optional; all other entries are required. Never place credentials in source or clients.
 
 Public documentation records configuration names and generic publication conventions only, not actual storage API endpoints, bucket names, account identifiers, deployment locations, credential values or internal network details. Manage actual settings through the GitHub publishing environment, and redact issues, pull requests, logs and screenshots. The `example.com` domain below is illustrative, not a working download source.
 
 | Type | Name | Purpose |
 | --- | --- | --- |
-| Secret | `S3_ENDPOINT` | HTTPS S3-compatible API endpoint, not the public download URL |
-| Secret | `S3_BUCKET` | Destination bucket |
+| Secret | `S3_BUCKET` | Full COS bucket name, including its APPID suffix |
 | Secret | `S3_KEY_PREFIX` | Optional object key prefix mapped to the public root |
-| Secret | `S3_REGION` | Optional region; defaults to `us-east-1` |
+| Secret | `S3_REGION` | COS region identifier matching the bucket's region |
 | Secret | `S3_ACCESS_KEY_ID` | CI uploads only |
 | Secret | `S3_SECRET_ACCESS_KEY` | CI uploads only |
 
-Configure public read-only downloads so `miocli/...` and `mihomo/...` objects resolve beneath the project's public download root (example: `https://downloads.example.com/public/`). The actual public root must match the installers, core downloader and publisher; do not substitute an internal storage API endpoint. Scope CI GetObject/PutObject permissions to the distribution prefix; deletion is unnecessary. Also grant bucket-level ListBucket so Head requests for missing objects return 404 instead of 403; a dedicated publication bucket is recommended. The API must support conditional Put (`If-None-Match` / `If-Match`); unsupported operations fail explicitly rather than falling back to unsafe overwrites. Protect the publishing environment and limit permitted tags.
+The Action uses the native COS SDK; `S3_ENDPOINT` and AWS CLI are no longer needed. Configure public read-only downloads so `miocli/...` objects resolve beneath the installers' public download root (example: `https://downloads.example.com/public/` uses prefix `public`). CI requires `cos:PutObject` for that prefix. With `clean: false`, historical files are not deleted and ListBucket or delete permissions are unnecessary. Protect the publishing environment and limit permitted tags.
 
 ```text
 miocli/install.sh                    # stable script entry
 miocli/install.ps1
 miocli/stable.txt                    # one-line stable version, updated last
 miocli/releases/vX.Y.Z/              # installers, six packages and SHA-256 files
-mihomo/releases/vA.B.C/              # six upstream archives, LICENSE and SOURCE.txt
 ```
 
-Verify all local packages and official Mihomo digests before uploading immutable objects; verify public downloads before promoting stable aliases. Version paths are byte-immutable: reruns reuse matching objects and report conflicts, 403s, upload errors or public verification failures. Stable updates are conditional and the workflow is serialized. Keep script aliases version-independent because multi-object promotion is not transactional. The public domain must honor Cache-Control and avoid long-lived stable-entry caches.
-
-If final public-index verification fails after promotion, the index may already have changed; publication reports failure instead of claiming success. Repair public access or caching and retry; same-version reruns also verify stable entry points.
+Verify build-artifact SHA-256 values, upload versioned packages and installer aliases, then upload `stable.txt` separately only after success. Upload jobs are serialized but not transactional: there are no conditional writes, conflict checks, automatic public verification or downgrade prevention. Failures may leave partial files; rerunning an older tag can overwrite stable. Do not rerun older tags to update stable entry points. The Action does not set Cache-Control; configure COS/CDN to avoid long-lived installer and stable-index caches.
 
 To upgrade Mihomo, update `internal/core/mihomo-release.json` after verifying an official stable version, all six filenames, archive SHA-256 values and the license. Prefer portable amd64 baseline variants. Update pinned-version notes in both READMEs and run mapping/download tests plus isolated-instance compatibility tests. Never update only the version string or query latest from clients.
 
-Mihomo is a separate GPL-3.0 program. The mirror preserves upstream archives and includes the upstream license plus `SOURCE.txt` directing users to corresponding versioned source downloads; maintainers must keep that source accessible. These directions do not mean source or configuration resources are mirrored to domestic S3.
+Mihomo is a separate GPL-3.0 program and is not mirrored or uploaded by this workflow. Clients download and verify its pinned version only from official GitHub Releases; when GitHub is unreachable, select an existing local core in setup.
 
 GitHub version lookup is limited to 15 seconds and package/checksum requests to 30 seconds each; S3 metadata/checksums use 60 seconds and archives 180 seconds. POSIX/Go also bound connection setup. PowerShell 7.4+ configures connection and operation timeouts separately; older PowerShell retains its `TimeoutSec` total request limit without requiring a PowerShell upgrade.
 
-Acceptance uses isolated user directories and a minimal local configuration without external rules/Geo/providers: with GitHub unreachable and no core installed, obtain the script from S3, install miocli, confirm managed-core S3 fallback, verify the version/digest and clean up only the created child. Real acceptance needs configured CI storage credentials and formal publication; passing tests does not mean S3 has been deployed.
+Acceptance uses isolated user directories: obtain the script from S3, install miocli and verify the version/digest. Download Mihomo from GitHub or reuse an existing local core. Real acceptance needs configured CI storage credentials and a successful stable-tag Release workflow; passing tests does not mean S3 has been deployed.
 
 ## Uninstall and cleanup
 

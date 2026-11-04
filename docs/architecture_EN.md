@@ -38,9 +38,9 @@ Bubble Tea commands run network requests asynchronously and return typed message
 
 - The POSIX installer resolves the canonical GitHub latest-release redirect without a new JSON dependency; PowerShell uses the GitHub Release API. Network/HTTP failure during lookup switches to S3 `miocli/stable.txt`.
 - Archive and checksum form one source-specific pair. Eligible GitHub download failure redownloads both from S3 at the same version; integrity failure never falls back. S3 redirects are disabled in installers.
-- `internal/core/mihomo-release.json` is the single pinned version, six-platform filename and SHA-256 manifest, embedded by Go and consumed by the publisher. Core downloads accept only official GitHub and the specified S3 namespace, with redirect, deadline and body-size limits.
-- Availability errors are distinct from integrity/policy errors. Setup displays the pinned version, fallback reason and verified source without changing confirmation or process ownership.
-- Formal Release publication triggers S3 synchronization. Immutable version objects are uploaded and verified through public HTTPS before script aliases and the stable index are promoted. Reruns verify existing objects, reject conflicting bytes and never downgrade stable.
+- `internal/core/mihomo-release.json` is the single pinned version, six-platform filename and SHA-256 manifest, embedded by Go. Core downloads accept only official GitHub, with redirect, deadline and body-size limits.
+- Availability errors are distinct from integrity/policy errors. Setup displays the pinned version and verified source without changing confirmation or process ownership. There is no Mihomo S3 fallback.
+- Stable-tag builds create draft Releases, then upload miocli packages and scripts using COS Action in the same workflow, with stable uploaded last. Historical objects remain, but there are no conflict or downgrade checks; rerunning an older tag can overwrite stable entry points.
 
 Distribution and controller API network policies are separate; the control API still ignores environment proxies. Distribution uses HTTPS. Co-hosted checksums do not replace independent signatures; package signing is not included.
 

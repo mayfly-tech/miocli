@@ -161,7 +161,6 @@ func TestInstallMihomoSourcePolicy(t *testing.T) {
 	for _, test := range []struct {
 		name         string
 		firstErr     error
-		secondErr    error
 		corrupt      bool
 		badArchive   bool
 		cancel       bool
@@ -169,8 +168,7 @@ func TestInstallMihomoSourcePolicy(t *testing.T) {
 		wantSuccess  bool
 	}{
 		{name: "github", wantRequests: 1, wantSuccess: true},
-		{name: "fallback", firstErr: &sourceUnavailable{"HTTP 503"}, wantRequests: 2, wantSuccess: true},
-		{name: "both unavailable", firstErr: &sourceUnavailable{"HTTP 503"}, secondErr: &sourceUnavailable{"HTTP 404"}, wantRequests: 2},
+		{name: "github unavailable", firstErr: &sourceUnavailable{"HTTP 503"}, wantRequests: 1},
 		{name: "policy rejected", firstErr: errors.New("invalid URL"), wantRequests: 1},
 		{name: "checksum", corrupt: true, wantRequests: 1},
 		{name: "corrupt archive", badArchive: true, wantRequests: 1},
@@ -211,13 +209,6 @@ func TestInstallMihomoSourcePolicy(t *testing.T) {
 					if test.firstErr != nil {
 						return nil, test.firstErr
 					}
-				} else {
-					if url != distributionRoot+"/mihomo/releases/"+release.Version+"/"+release.Assets[0].Name || timeout != 180*time.Second {
-						t.Fatalf("mirror request = %s, %s", url, timeout)
-					}
-					if test.secondErr != nil {
-						return nil, test.secondErr
-					}
 				}
 				if test.corrupt {
 					return []byte("wrong archive"), nil
@@ -240,7 +231,7 @@ func TestInstallMihomoSourcePolicy(t *testing.T) {
 			want := "old-core"
 			if test.wantSuccess {
 				want = "verified-core"
-				if len(events) == 0 || events[len(events)-1].Fallback {
+				if len(events) != 1 || events[0].Source != "GitHub" {
 					t.Fatal("missing verified source notification")
 				}
 			}
@@ -293,18 +284,16 @@ func TestDownloadMihomoRejectsUntrustedDestinations(t *testing.T) {
 			t.Fatalf("accepted %s", url)
 		}
 	}
-	for _, mirror := range []bool{false, true} {
-		client := downloadHTTPClient(30*time.Second, mirror)
-		request, _ := http.NewRequest(http.MethodGet, "https://evil.test/file", nil)
-		if err := client.CheckRedirect(request, nil); err == nil {
-			t.Fatal("accepted foreign redirect")
-		}
-		request, _ = http.NewRequest(http.MethodGet, distributionRoot+"/mihomo/releases/v1.19.33/file", nil)
-		if err := client.CheckRedirect(request, nil); (err == nil) != mirror {
-			t.Fatalf("mirror redirect policy: %v", err)
-		}
-		client.CloseIdleConnections()
+	client := downloadHTTPClient(30 * time.Second)
+	request, _ := http.NewRequest(http.MethodGet, "https://evil.test/file", nil)
+	if err := client.CheckRedirect(request, nil); err == nil {
+		t.Fatal("accepted foreign redirect")
 	}
+	request, _ = http.NewRequest(http.MethodGet, "https://s3.usemayfly.tech/public/mihomo/releases/v1.19.33/file", nil)
+	if err := client.CheckRedirect(request, nil); err == nil {
+		t.Fatal("accepted mirror redirect")
+	}
+	client.CloseIdleConnections()
 }
 
 func TestMihomoReadLimitsAndCancellation(t *testing.T) {
@@ -328,7 +317,7 @@ func TestMihomoReadLimitsAndCancellation(t *testing.T) {
 	}
 }
 
-func TestIsolatedS3Bootstrap(t *testing.T) {
+func TestIsolatedPinnedBootstrap(t *testing.T) {
 	archivePath := os.Getenv("MIOCLI_TEST_ARCHIVE")
 	if archivePath == "" {
 		t.Skip("set MIOCLI_TEST_ARCHIVE to the verified pinned archive for this platform")
@@ -349,27 +338,24 @@ func TestIsolatedS3Bootstrap(t *testing.T) {
 		t.Fatal(err)
 	}
 	var requests []string
-	mirror := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requests = append(requests, r.URL.Path)
 		_, _ = w.Write(archive)
 	}))
-	defer mirror.Close()
+	defer server.Close()
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	download := func(ctx context.Context, url string, timeout time.Duration) ([]byte, error) {
-		if strings.HasPrefix(url, "https://github.com/") {
-			return nil, &sourceUnavailable{"GitHub deliberately blocked"}
-		}
-		expected := distributionRoot + "/mihomo/releases/" + release.Version + "/" + asset.Name
+		expected := "https://github.com/" + mihomoRepo + "/releases/download/" + release.Version + "/" + asset.Name
 		if url != expected {
-			t.Fatalf("mirror URL = %s, want %s", url, expected)
+			t.Fatalf("download URL = %s, want %s", url, expected)
 		}
 		request, err := http.NewRequestWithContext(ctx, http.MethodGet,
-			mirror.URL+"/public/mihomo/releases/"+release.Version+"/"+asset.Name, nil)
+			server.URL+"/releases/download/"+release.Version+"/"+asset.Name, nil)
 		if err != nil {
 			return nil, err
 		}
-		return readMihomoResponse(ctx, mirror.Client(), request)
+		return readMihomoResponse(ctx, server.Client(), request)
 	}
 	dir := t.TempDir()
 	binary, err := installMihomo(ctx, filepath.Join(dir, "bin"), runtime.GOOS, runtime.GOARCH, pinnedReleaseJSON, download, nil)
@@ -377,7 +363,7 @@ func TestIsolatedS3Bootstrap(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(requests) != 1 {
-		t.Fatalf("mirror requests = %v", requests)
+		t.Fatalf("download requests = %v", requests)
 	}
 	version, err := BinaryVersion(ctx, binary)
 	if err != nil || !strings.Contains(version, release.Version) {

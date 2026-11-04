@@ -231,7 +231,7 @@ func setupManaged(cmd *cobra.Command, path string, baseline config.Config, deps 
 		if err != nil {
 			return err
 		}
-		if err := confirm(cmd, deps, fmt.Sprintf("Download Mihomo %s from GitHub (domestic S3 fallback on network/HTTP failure) and verify pinned SHA-256?", version)); err != nil {
+		if err := confirm(cmd, deps, fmt.Sprintf("Download Mihomo %s from GitHub and verify pinned SHA-256?", version)); err != nil {
 			return err
 		}
 		var events []core.DownloadProgress
@@ -243,11 +243,7 @@ func setupManaged(cmd *cobra.Command, path string, baseline config.Config, deps 
 			return installErr
 		})
 		for _, event := range events {
-			if event.Fallback {
-				fmt.Fprintf(cmd.ErrOrStderr(), "GitHub unavailable: %s. Retrying the same Mihomo version from domestic S3.\n", event.Reason)
-			} else {
-				fmt.Fprintf(cmd.OutOrStdout(), "Verified Mihomo %s from %s.\n", version, event.Source)
-			}
+			fmt.Fprintf(cmd.OutOrStdout(), "Verified Mihomo %s from %s.\n", version, event.Source)
 		}
 		if err != nil {
 			return err

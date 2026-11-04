@@ -10,8 +10,6 @@ import (
 	"strings"
 )
 
-const distributionRoot = "https://s3.usemayfly.tech/public"
-
 //go:embed mihomo-release.json
 var pinnedReleaseJSON []byte
 

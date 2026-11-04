@@ -44,7 +44,7 @@ powershell -ExecutionPolicy Bypass -File .\install.ps1
 
 Installers verify the release archive's SHA-256 and install the CLI to a user directory without administrator privileges. Existing Clash Verge and other Mihomo users need only a reachable control API; no second core is required.
 
-Package downloads always try GitHub first, falling back to domestic S3 only on network failure, timeout or HTTP error. Without an explicit version, a failed GitHub version lookup uses S3's stable index; once resolved, a version never changes during fallback. Use `--version vX.Y.Z` (PowerShell: `-Version vX.Y.Z`) to skip version lookup. Invalid metadata, checksum failure, certificate/redirect policy errors and cancellation do not trigger fallback; failures preserve the existing CLI. S3 entry points become available only after maintainers complete the first formal-release synchronization; see [publication setup](docs/development_EN.md#domestic-s3-publication).
+Package downloads always try GitHub first, falling back to S3 only on network failure, timeout or HTTP error. Without an explicit version, a failed GitHub version lookup uses S3's stable index; once resolved, a version never changes during fallback. Use `--version vX.Y.Z` (PowerShell: `-Version vX.Y.Z`) to skip version lookup. Invalid metadata, checksum failure, certificate/redirect policy errors and cancellation do not trigger fallback; failures preserve the existing CLI. S3 entry points become available after successful uploads in the stable-tag Release workflow, without waiting for formal GitHub publication; see [publication setup](docs/development_EN.md#domestic-s3-publication).
 
 ### Connect to an existing core
 
@@ -72,7 +72,7 @@ Set the existing controller address and secret in the local file. `dev` connects
 
 Choose managed mode in setup and confirm configuration import and any required download. miocli operates on a copy of the selected configuration and stops only a child process started by that invocation. Connection failures never switch to managed mode automatically. See the [product overview](docs/product_EN.md).
 
-Managed mode never edits the source configuration. Disable TUN and custom listeners before import, and make relative-path resources available. A missing core is downloaded only after separate confirmation. Mihomo is currently pinned to `v1.19.33`: official GitHub first, same-version domestic S3 fallback on network/HTTP failure, and verification against an embedded SHA-256. Settings are saved only after validation.
+Managed mode never edits the source configuration. Disable TUN and custom listeners before import, and make relative-path resources available. A missing core is downloaded only after separate confirmation. Mihomo is currently pinned to `v1.19.33`: downloads use only official GitHub and are verified against an embedded SHA-256. There is no Mihomo S3 fallback; select an existing local core when GitHub is unreachable. Settings are saved only after validation.
 
 This is online bootstrap, not full offline support: subscriptions, providers, rules and Geo data may still require network access. An existing local Mihomo executable can still be selected in setup.
 

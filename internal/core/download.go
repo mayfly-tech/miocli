@@ -82,9 +82,7 @@ func InstallMihomo(ctx context.Context, binaryDir string) (string, error) {
 }
 
 type DownloadProgress struct {
-	Source   string
-	Fallback bool
-	Reason   string
+	Source string
 }
 
 func InstallMihomoWithProgress(ctx context.Context, binaryDir string, progress func(DownloadProgress)) (string, error) {
@@ -110,21 +108,9 @@ func installMihomo(ctx context.Context, binaryDir, goos, goarch string, manifest
 		return "", err
 	}
 	githubURL := "https://github.com/" + mihomoRepo + "/releases/download/" + release.Version + "/" + asset.Name
-	source := "GitHub"
 	archive, err := download(ctx, githubURL, 30*time.Second)
 	if ctx.Err() != nil {
 		return "", ctx.Err()
-	}
-	var unavailable *sourceUnavailable
-	if err != nil && ctx.Err() == nil && errors.As(err, &unavailable) {
-		if progress != nil {
-			progress(DownloadProgress{Source: "S3", Fallback: true, Reason: err.Error()})
-		}
-		source = "S3"
-		archive, err = download(ctx, distributionRoot+"/mihomo/releases/"+release.Version+"/"+asset.Name, 180*time.Second)
-		if err != nil {
-			return "", errors.Join(unavailable, fmt.Errorf("S3 Mihomo download: %w", err))
-		}
 	}
 	if err != nil {
 		return "", err
@@ -149,7 +135,7 @@ func installMihomo(ctx context.Context, binaryDir, goos, goarch string, manifest
 		return "", err
 	}
 	if progress != nil {
-		progress(DownloadProgress{Source: source})
+		progress(DownloadProgress{Source: "GitHub"})
 	}
 	return path, nil
 }
@@ -174,11 +160,8 @@ type sourceUnavailable struct{ reason string }
 
 func (err *sourceUnavailable) Error() string { return err.reason }
 
-func downloadHTTPClient(timeout time.Duration, mirror bool) *http.Client {
+func downloadHTTPClient(timeout time.Duration) *http.Client {
 	dialTimeout := 8 * time.Second
-	if mirror {
-		dialTimeout = 15 * time.Second
-	}
 	transport := http.DefaultTransport.(*http.Transport).Clone()
 	transport.DialContext = (&net.Dialer{Timeout: dialTimeout}).DialContext
 	transport.TLSHandshakeTimeout = dialTimeout
@@ -188,9 +171,6 @@ func downloadHTTPClient(timeout time.Duration, mirror bool) *http.Client {
 		CheckRedirect: func(request *http.Request, via []*http.Request) error {
 			host := strings.ToLower(request.URL.Hostname())
 			allowedHost := host == "github.com" || strings.HasSuffix(host, ".githubusercontent.com")
-			if mirror {
-				allowedHost = host == "s3.usemayfly.tech" && strings.HasPrefix(request.URL.Path, "/public/mihomo/releases/")
-			}
 			if len(via) >= 5 || request.URL.Scheme != "https" || !allowedHost || request.URL.User != nil ||
 				(request.URL.Port() != "" && request.URL.Port() != "443") {
 				return errors.New("Mihomo download redirect is not allowed")
@@ -205,11 +185,9 @@ func downloadMihomoAsset(ctx context.Context, assetURL string, timeout time.Dura
 	if err != nil {
 		return nil, errors.New("Mihomo release contains an invalid binary URL")
 	}
-	mirror := parsed.Hostname() == "s3.usemayfly.tech"
 	if parsed.Scheme != "https" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" ||
 		(parsed.Port() != "" && parsed.Port() != "443") ||
-		(!mirror && parsed.Hostname() != "github.com") ||
-		(mirror && !strings.HasPrefix(parsed.Path, "/public/mihomo/releases/")) {
+		parsed.Hostname() != "github.com" {
 		return nil, errors.New("Mihomo release contains an invalid binary URL")
 	}
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, parsed.String(), nil)
@@ -217,7 +195,7 @@ func downloadMihomoAsset(ctx context.Context, assetURL string, timeout time.Dura
 		return nil, errors.New("create Mihomo binary request")
 	}
 	request.Header.Set("User-Agent", "miocli")
-	client := downloadHTTPClient(timeout, mirror)
+	client := downloadHTTPClient(timeout)
 	defer client.CloseIdleConnections()
 	return readMihomoResponse(ctx, client, request)
 }

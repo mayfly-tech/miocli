@@ -44,7 +44,7 @@ powershell -ExecutionPolicy Bypass -File .\install.ps1
 
 安装器校验发布包 SHA-256，并将 CLI 安装到用户目录，不需要管理员权限。已有 Clash Verge 等客户端时，只需可访问的 Mihomo 控制 API；无需安装第二个内核。
 
-发布包始终优先从 GitHub 下载，网络失败、超时或 HTTP 错误时自动回退 S3 镜像。未指定版本时，GitHub 版本查询失败才读取 S3 的稳定版本索引；版本一旦确定，回退不会降级。指定 `--version vX.Y.Z`（PowerShell：`-Version vX.Y.Z`）可跳过版本查询。校验失败、非法版本、证书/重定向策略错误或取消不会触发回退；失败不会替换已有 CLI。S3 入口须在维护者完成首次正式发布同步后可用，详见[发布配置](docs/development.md#s3-镜像发布)。
+发布包始终优先从 GitHub 下载，网络失败、超时或 HTTP 错误时自动回退 S3 镜像。未指定版本时，GitHub 版本查询失败才读取 S3 的稳定版本索引；版本一旦确定，回退不会降级。指定 `--version vX.Y.Z`（PowerShell：`-Version vX.Y.Z`）可跳过版本查询。校验失败、非法版本、证书/重定向策略错误或取消不会触发回退；失败不会替换已有 CLI。S3 入口在稳定标签的 Release 工作流成功上传后可用，无需等待 GitHub 草稿正式发布，详见[发布配置](docs/development.md#s3-镜像发布)。
 
 ### 连接已有内核
 
@@ -72,7 +72,7 @@ go run ./cmd/miocli dev
 
 在 setup 中明确选择 managed，并确认导入配置和下载（如需要）。miocli 管理所选配置的副本；运行时只停止本次启动的子进程。连接失败不会自动切换为托管模式。详见[产品说明](docs/product.md)。
 
-托管模式不修改源配置。导入前需关闭 TUN 和自定义监听，并确保相对路径引用的资源可用；缺少内核时，需单独确认下载。当前固定 Mihomo `v1.19.33`，优先官方 GitHub Release，网络/HTTP 失败时从 S3 镜像下载同一版本，并与内置 SHA-256 校验。设置仅在配置验证成功后保存。
+托管模式不修改源配置。导入前需关闭 TUN 和自定义监听，并确保相对路径引用的资源可用；缺少内核时，需单独确认下载。当前固定 Mihomo `v1.19.33`，仅从官方 GitHub Release 下载，并与内置 SHA-256 校验；不再提供 Mihomo S3 镜像兜底。GitHub 不可达时可指定已有本地内核。设置仅在配置验证成功后保存。
 
 这是在线安装兜底，不是完整离线模式：订阅、providers、规则集和 Geo 数据仍可能需要网络；已有本地 Mihomo 可在 setup 中指定路径复用。
 
