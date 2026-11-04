@@ -93,6 +93,8 @@ go test -race -count=1 -run '^TestIsolatedS3Bootstrap$' ./internal/core
 
 ## S3 镜像发布
 
+发布包按目标平台导出第三方许可证，不跳过 Windows 专用依赖。`go-localereader` 固定在 `v0.0.2-0.20220822084737-6bae6c923850`：该提交相对 `v0.0.1` 仅补充上游 LICENSE，无代码变更，避免 Windows 打包时因缺少许可证失败。
+
 标签构建仍创建 GitHub 草稿 Release。正式发布稳定版本后，`publish-s3.yml` 在受保护的 `s3-release` 环境同步已经生成的 Release 文件，不重新构建二进制。也可通过 workflow_dispatch 指定已正式发布的稳定标签重试；旧版本不会降级稳定索引。
 
 环境配置（不要将凭据写入源码或客户端）：

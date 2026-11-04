@@ -93,6 +93,8 @@ go test -race -count=1 -run '^TestIsolatedS3Bootstrap$' ./internal/core
 
 ## Domestic S3 publication
 
+Release archives export third-party licenses for each target platform without skipping Windows-only dependencies. `go-localereader` is pinned to `v0.0.2-0.20220822084737-6bae6c923850`: compared with `v0.0.1`, this commit only adds the upstream LICENSE with no code changes, preventing Windows packaging failures due to a missing license.
+
 Tag builds still create draft GitHub Releases. Publishing a stable Release triggers `publish-s3.yml` in the protected `s3-release` environment, synchronizing existing Release files without rebuilding binaries. A workflow_dispatch run can retry a previously published stable tag; older tags never downgrade the stable index.
 
 Environment configuration (never place credentials in source or clients):
