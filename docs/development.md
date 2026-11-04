@@ -36,7 +36,6 @@ go build -o /tmp/miocli ./cmd/miocli
 go run ./cmd/miocli version
 sh -n install.sh
 sh tests/installers/shell.sh
-python3 -B -m unittest discover -s tests -p '*_test.py'
 ```
 
 ## 提交信息与 Git hooks
