@@ -67,6 +67,8 @@ GOOS=windows GOARCH=amd64 go build -o /tmp/miocli-windows-amd64.exe ./cmd/miocli
 
 `TestMihomoIntegration` 需要隔离实例，包含 `MIOCLI-Selector` 组（成员为 `DIRECT` 和 `REJECT`）及单节点文件 provider `MIOCLI-Provider`。测试会切换节点和模式、更新 provider 并调用 `DIRECT` 延迟 API；不要指向日常使用实例。
 
+延迟测试使用本地 HTTP 端点，响应前等待 10ms，避免回环请求不足 1ms 时被 Mihomo 记为零延迟并返回 HTTP 503；不依赖外网测速地址。
+
 ```sh
 MIOCLI_INTEGRATION_URL=http://127.0.0.1:19090 \
 MIOCLI_INTEGRATION_SECRET=miocli-ci-secret \

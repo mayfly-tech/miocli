@@ -67,6 +67,8 @@ GOOS=windows GOARCH=amd64 go build -o /tmp/miocli-windows-amd64.exe ./cmd/miocli
 
 `TestMihomoIntegration` requires a disposable instance with a `MIOCLI-Selector` group containing `DIRECT` and `REJECT`, and a single-node file provider named `MIOCLI-Provider`. The test changes node and mode, updates the provider and calls the `DIRECT` delay API. Do not target an instance used for normal traffic.
 
+The delay test uses a local HTTP endpoint that waits 10ms before responding, preventing sub-millisecond loopback requests from being recorded as zero latency and rejected with HTTP 503 by Mihomo. It does not depend on an external latency-test URL.
+
 ```sh
 MIOCLI_INTEGRATION_URL=http://127.0.0.1:19090 \
 MIOCLI_INTEGRATION_SECRET=miocli-ci-secret \
