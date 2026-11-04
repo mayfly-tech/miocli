@@ -9,6 +9,10 @@
 - Go 1.24 或更新版本。
 - 单元测试使用本地测试服务器和 fake client；只有手动运行 Mihomo 集成测试时才需要测试实例。
 
+## 提交信息
+
+首次提交前可运行 `sh scripts/install-hooks.sh` 安装本地提交信息检查。提交信息遵循 Conventional Commits，例如 `feat(cli): add profile command`。详见[开发指南](docs/development.md#提交信息与-git-hooks)。
+
 ## 提交前检查
 
 ```sh

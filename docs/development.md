@@ -39,6 +39,16 @@ sh tests/installers/shell.sh
 python3 -B -m unittest discover -s tests -p '*_test.py'
 ```
 
+## 提交信息与 Git hooks
+
+在仓库根目录安装本地提交信息检查：
+
+```sh
+sh scripts/install-hooks.sh
+```
+
+提交信息须符合 Conventional Commits：`type(scope)!: subject`，scope 和破坏性变更标记 `!` 可选。支持的类型为 `feat`、`fix`、`docs`、`style`、`refactor`、`perf`、`test`、`build`、`ci`、`chore` 和 `revert`。例如：`feat(cli): add profile command`。Git 自动生成的合并、撤销、fixup 和 squash 提交信息不作校验。该 hook 只检查提交信息，不会运行格式化或测试；安装配置仅对当前克隆有效。
+
 Windows 安装器测试：
 
 ```powershell

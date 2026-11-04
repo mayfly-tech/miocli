@@ -39,6 +39,16 @@ sh tests/installers/shell.sh
 python3 -B -m unittest discover -s tests -p '*_test.py'
 ```
 
+## Commit messages and Git hooks
+
+Install the local commit message check from the repository root:
+
+```sh
+sh scripts/install-hooks.sh
+```
+
+Commit messages must follow Conventional Commits: `type(scope)!: subject`, with an optional scope and breaking-change marker `!`. Supported types are `feat`, `fix`, `docs`, `style`, `refactor`, `perf`, `test`, `build`, `ci`, `chore` and `revert`. For example: `feat(cli): add profile command`. Git-generated merge, revert, fixup and squash messages are not checked. The hook checks only commit messages; it does not run formatting or tests. Installation applies only to the current clone.
+
 Test the Windows installer with:
 
 ```powershell

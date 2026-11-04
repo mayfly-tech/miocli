@@ -9,6 +9,10 @@ Contributions to `miocli` are welcome. Discuss larger behavior changes in an iss
 - Go 1.24 or newer.
 - Unit tests use local test servers and fake clients. A Mihomo instance is needed only for manually run integration tests.
 
+## Commit messages
+
+Before your first commit, you can install the local commit message check with `sh scripts/install-hooks.sh`. Commit messages follow Conventional Commits, for example `feat(cli): add profile command`. See the [development guide](docs/development_EN.md#commit-messages-and-git-hooks) for details.
+
 ## Checks before opening a pull request
 
 ```sh
