@@ -227,14 +227,28 @@ func setupManaged(cmd *cobra.Command, path string, baseline config.Config, deps 
 			return err
 		}
 		fmt.Fprintf(cmd.OutOrStdout(), "No reusable core found. Download target: %s.\n", paths.BinaryDir)
-		if err := confirm(cmd, deps, "Download the current stable Mihomo from official GitHub Releases and verify SHA-256?"); err != nil {
+		version, err := core.PinnedMihomoVersion()
+		if err != nil {
 			return err
 		}
+		if err := confirm(cmd, deps, fmt.Sprintf("Download Mihomo %s from GitHub (domestic S3 fallback on network/HTTP failure) and verify pinned SHA-256?", version)); err != nil {
+			return err
+		}
+		var events []core.DownloadProgress
 		err = runWork(cmd, "Downloading and verifying Mihomo", func(ctx context.Context) error {
 			var installErr error
-			binary, installErr = core.InstallMihomo(ctx, paths.BinaryDir)
+			binary, installErr = core.InstallMihomoWithProgress(ctx, paths.BinaryDir, func(event core.DownloadProgress) {
+				events = append(events, event)
+			})
 			return installErr
 		})
+		for _, event := range events {
+			if event.Fallback {
+				fmt.Fprintf(cmd.ErrOrStderr(), "GitHub unavailable: %s. Retrying the same Mihomo version from domestic S3.\n", event.Reason)
+			} else {
+				fmt.Fprintf(cmd.OutOrStdout(), "Verified Mihomo %s from %s.\n", version, event.Source)
+			}
+		}
 		if err != nil {
 			return err
 		}

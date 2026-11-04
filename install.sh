@@ -3,6 +3,7 @@ set -eu
 
 REPOSITORY="${MIOCLI_REPOSITORY:-__MIOCLI_REPOSITORY__}"
 BIN_NAME="miocli"
+S3_ROOT="https://s3.usemayfly.tech/public"
 
 fail() {
   printf 'miocli installer: %s\n' "$*" >&2
@@ -14,6 +15,7 @@ usage() {
   printf 'Install only miocli. Existing Mihomo/Clash Verge cores are not modified.\n'
   printf 'MIOCLI_INSTALL_DIR overrides the default ~/.local/bin. PATH is never modified.\n'
   printf '%s\n' '--yes confirms CLI replacement only, not Mihomo installation.'
+  printf 'GitHub is tried first; network/HTTP failure retries the same version from domestic S3.\n'
 }
 
 version=""
@@ -66,7 +68,7 @@ case "$repo" in
   ""|*/*) fail "invalid GitHub repository name" ;;
 esac
 
-for tool in curl uname tar awk head grep sed mktemp mkdir install mv rm; do
+for tool in curl uname tar awk cat grep sed mktemp mkdir install mv rm; do
   command -v "$tool" >/dev/null 2>&1 || fail "$tool is required"
 done
 
@@ -84,21 +86,6 @@ case "$arch" in
   *) fail "unsupported architecture: $arch" ;;
 esac
 
-if [ -z "$version" ]; then
-  release_json="$(curl --connect-timeout 15 --max-time 60 -fsSL "https://api.github.com/repos/$REPOSITORY/releases/latest")" \
-    || fail "could not check the latest release"
-  version="$(printf '%s\n' "$release_json" | sed -n 's/.*"tag_name":[[:space:]]*"\([^"]*\)".*/\1/p' | head -n 1)"
-  [ -n "$version" ] || fail "latest release has no version tag"
-fi
-case "$version" in v*) ;; *) version="v$version" ;; esac
-printf '%s\n' "$version" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+([+-][A-Za-z0-9.-]+)?$' \
-  || fail "version must be a semantic version such as v1.2.3"
-version_number="${version#v}"
-archive="miocli_${version_number}_${os}_${arch}.tar.gz"
-base_url="https://github.com/$REPOSITORY/releases/download/$version"
-printf 'Install miocli %s (%s/%s) to %s\n' "$version" "$os" "$arch" "$install_dir/$BIN_NAME"
-mkdir -p "$install_dir" || fail "could not create install directory: $install_dir"
-[ -w "$install_dir" ] || fail "install directory is not writable: $install_dir"
 tmp_dir="$(mktemp -d)"
 staged=""
 cleanup() {
@@ -109,10 +96,81 @@ trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' HUP TERM
 
-curl --connect-timeout 15 --max-time 180 -fsSL "$base_url/$archive" -o "$tmp_dir/$archive" \
-  || fail "could not download $archive"
-curl --connect-timeout 15 --max-time 60 -fsSL "$base_url/$archive.sha256" -o "$tmp_dir/$archive.sha256" \
-  || fail "could not download the archive checksum"
+# Only curl availability failures may switch sources; trust and policy errors stop.
+fetch() {
+  source_name="$1"; request_limit="$2"; request_url="$3"; request_out="$4"
+  shift 4
+  connect_limit=8
+  redirects=5
+  if [ "$source_name" = S3 ]; then connect_limit=15; redirects=0; fi
+  if curl --proto '=https' --proto-redir '=https' --max-redirs "$redirects" \
+      --connect-timeout "$connect_limit" --max-time "$request_limit" -fsSL \
+      "$@" "$request_url" -o "$request_out"; then
+    return 0
+  else
+    curl_status=$?
+    printf '%s request failed (curl exit %s).\n' "$source_name" "$curl_status" >&2
+    case "$curl_status" in
+      5|6|7|18|22|28|35|52|55|56) return 2 ;;
+      *) return 1 ;;
+    esac
+  fi
+}
+
+source=GitHub
+if [ -z "$version" ]; then
+  # The canonical release redirect supplies the tag without a JSON parser dependency.
+  if fetch GitHub 15 "https://github.com/$REPOSITORY/releases/latest" /dev/null \
+      --connect-timeout 5 --head --write-out '%{url_effective}' > "$tmp_dir/latest"; then
+    latest_url="$(cat "$tmp_dir/latest")"
+    case "$latest_url" in
+      "https://github.com/$REPOSITORY/releases/tag/"*) version="${latest_url##*/}" ;;
+      *) fail "GitHub latest release returned an invalid version destination" ;;
+    esac
+  else
+    status=$?
+    [ "$status" -eq 2 ] || fail "GitHub latest request rejected; no fallback"
+    printf 'GitHub unavailable; checking domestic S3 stable version.\n' >&2
+    source=S3
+    fetch S3 60 "$S3_ROOT/miocli/stable.txt" "$tmp_dir/latest" \
+      || fail "GitHub and S3 version lookup failed"
+    version="$(cat "$tmp_dir/latest")"
+    printf '%s\n' "$version" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$' \
+      || fail "S3 stable version is invalid"
+  fi
+fi
+case "$version" in v*) ;; *) version="v$version" ;; esac
+case "$version" in *[!A-Za-z0-9.+-]*) fail "version contains invalid characters" ;; esac
+printf '%s\n' "$version" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+([+-][A-Za-z0-9.-]+)?$' \
+  || fail "version must be a semantic version such as v1.2.3"
+version_number="${version#v}"
+archive="miocli_${version_number}_${os}_${arch}.tar.gz"
+printf 'Install miocli %s (%s/%s) to %s\n' "$version" "$os" "$arch" "$install_dir/$BIN_NAME"
+mkdir -p "$install_dir" || fail "could not create install directory: $install_dir"
+[ -w "$install_dir" ] || fail "install directory is not writable: $install_dir"
+fetch_pair() {
+  pair_source="$1"
+  pair_limit=30
+  base_url="https://github.com/$REPOSITORY/releases/download/$version"
+  if [ "$pair_source" = S3 ]; then
+    base_url="$S3_ROOT/miocli/releases/$version"
+    pair_limit=180
+  fi
+  fetch "$pair_source" "$pair_limit" "$base_url/$archive" "$tmp_dir/$archive" || return $?
+  checksum_limit=30
+  [ "$pair_source" != S3 ] || checksum_limit=60
+  fetch "$pair_source" "$checksum_limit" "$base_url/$archive.sha256" "$tmp_dir/$archive.sha256"
+}
+if fetch_pair "$source"; then
+  :
+else
+  status=$?
+  [ "$source" = GitHub ] && [ "$status" -eq 2 ] || fail "$source download failed; existing CLI unchanged"
+  printf 'GitHub unavailable; retrying miocli %s archive and checksum from domestic S3.\n' "$version" >&2
+  rm -f "$tmp_dir/$archive" "$tmp_dir/$archive.sha256"
+  source=S3
+  fetch_pair S3 || fail "GitHub and S3 downloads failed for $version; existing CLI unchanged"
+fi
 
 if command -v sha256sum >/dev/null 2>&1; then
   actual="$(sha256sum "$tmp_dir/$archive" | awk '{print $1}')"
@@ -121,7 +179,8 @@ elif command -v shasum >/dev/null 2>&1; then
 else
   fail "sha256sum or shasum is required to verify the download"
 fi
-expected="$(awk -v file="$archive" '$2 == file { print tolower($1); exit }' "$tmp_dir/$archive.sha256")"
+expected="$(awk -v file="$archive" 'NF { lines++; if (NF == 2 && $2 == file) hash = tolower($1) }
+  END { if (lines == 1) print hash }' "$tmp_dir/$archive.sha256")"
 case "$expected" in
   *[!0-9a-fA-F]*|'') fail "release checksum file is invalid" ;;
 esac
@@ -138,7 +197,7 @@ install -m 0755 "$package_dir/$BIN_NAME" "$staged" \
 mv -f "$staged" "$install_dir/$BIN_NAME" \
   || fail "could not install $BIN_NAME to $install_dir"
 
-printf 'Installed %s %s to %s\n' "$BIN_NAME" "$version" "$install_dir/$BIN_NAME"
+printf 'Installed %s %s from %s to %s\n' "$BIN_NAME" "$version" "$source" "$install_dir/$BIN_NAME"
 case ":${PATH:-}:" in
   *":$install_dir:"*) ;;
   *)

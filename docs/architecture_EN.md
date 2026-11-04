@@ -34,6 +34,16 @@ Bubble Tea commands run network requests asynchronously and return typed message
 - Connection failures for configured instances never trigger installation or a second core. Managed startup starts a child only after a connection refusal and stops only its own child on exit.
 - Full-profile writes require a managed child started by this invocation. Profile application records a protected transaction, performs one hot reload and reads state back; timeouts and readback failures retain the transaction and never replay writes automatically.
 
+## Release distribution
+
+- The POSIX installer resolves the canonical GitHub latest-release redirect without a new JSON dependency; PowerShell uses the GitHub Release API. Network/HTTP failure during lookup switches to S3 `miocli/stable.txt`.
+- Archive and checksum form one source-specific pair. Eligible GitHub download failure redownloads both from S3 at the same version; integrity failure never falls back. S3 redirects are disabled in installers.
+- `internal/core/mihomo-release.json` is the single pinned version, six-platform filename and SHA-256 manifest, embedded by Go and consumed by the publisher. Core downloads accept only official GitHub and the specified S3 namespace, with redirect, deadline and body-size limits.
+- Availability errors are distinct from integrity/policy errors. Setup displays the pinned version, fallback reason and verified source without changing confirmation or process ownership.
+- Formal Release publication triggers S3 synchronization. Immutable version objects are uploaded and verified through public HTTPS before script aliases and the stable index are promoted. Reruns verify existing objects, reject conflicting bytes and never downgrade stable.
+
+Distribution and controller API network policies are separate; the control API still ignores environment proxies. Distribution uses HTTPS. Co-hosted checksums do not replace independent signatures; package signing is not included.
+
 ## Mihomo API
 
 | Operation | API |

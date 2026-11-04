@@ -1,0 +1,11 @@
+{
+  "version": "v1.19.33",
+  "assets": [
+    {"os": "linux", "arch": "amd64", "name": "mihomo-linux-amd64-v1-v1.19.33.gz", "format": ".gz", "sha256": "8ec92e7b2fdc6b853ba00156bab7e4e965c8b0d843b8c4ac8ab98795f02ad524"},
+    {"os": "linux", "arch": "arm64", "name": "mihomo-linux-arm64-v1.19.33.gz", "format": ".gz", "sha256": "ba408b317080ee265c46cb923a50018c1b82cbd708551cdd46a1e3e307396187"},
+    {"os": "darwin", "arch": "amd64", "name": "mihomo-darwin-amd64-v1-v1.19.33.gz", "format": ".gz", "sha256": "61f979d6aae3deffe4e3895161349c3d9189149eef88c5aceb7c6d4a7270a78d"},
+    {"os": "darwin", "arch": "arm64", "name": "mihomo-darwin-arm64-v1.19.33.gz", "format": ".gz", "sha256": "060b64b0f2c9a310831db0fe4adb2878de67bfa606c311813c1f13966aa504b6"},
+    {"os": "windows", "arch": "amd64", "name": "mihomo-windows-amd64-v1-v1.19.33.zip", "format": ".zip", "sha256": "fb0b960eff568459502d4ebe53e9cca203053d86ec9024fe935f19615d74d9aa"},
+    {"os": "windows", "arch": "arm64", "name": "mihomo-windows-arm64-v1.19.33.zip", "format": ".zip", "sha256": "a2a26869a14634c49f3fbcecc593b498ed8591fbdd7616b24475b3d60b148da3"}
+  ]
+}

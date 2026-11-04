@@ -6,11 +6,12 @@ import (
 	"compress/gzip"
 	"context"
 	"crypto/sha256"
+	"crypto/tls"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -23,19 +24,9 @@ import (
 
 const (
 	mihomoRepo       = "MetaCubeX/mihomo"
-	maxReleaseBytes  = 4 << 20
 	maxBinaryBytes   = 256 << 20
 	maxDownloadBytes = 128 << 20
 )
-
-type githubRelease struct {
-	TagName string `json:"tag_name"`
-	Assets  []struct {
-		Name               string `json:"name"`
-		BrowserDownloadURL string `json:"browser_download_url"`
-		Digest             string `json:"digest"`
-	} `json:"assets"`
-}
 
 func FindMihomo(binaryDir, explicit string) (string, error) {
 	if explicit != "" {
@@ -87,40 +78,68 @@ func BinaryVersion(ctx context.Context, binary string) (string, error) {
 }
 
 func InstallMihomo(ctx context.Context, binaryDir string) (string, error) {
+	return InstallMihomoWithProgress(ctx, binaryDir, nil)
+}
+
+type DownloadProgress struct {
+	Source   string
+	Fallback bool
+	Reason   string
+}
+
+func InstallMihomoWithProgress(ctx context.Context, binaryDir string, progress func(DownloadProgress)) (string, error) {
+	return installMihomo(ctx, binaryDir, runtime.GOOS, runtime.GOARCH, pinnedReleaseJSON, downloadMihomoAsset, progress)
+}
+
+func installMihomo(ctx context.Context, binaryDir, goos, goarch string, manifest []byte,
+	download func(context.Context, string, time.Duration) ([]byte, error), progress func(DownloadProgress)) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
 	name := "mihomo"
-	if runtime.GOOS == "windows" {
+	if goos == "windows" {
 		name += ".exe"
 	}
 	path := filepath.Join(binaryDir, name)
-	release, err := latestMihomoRelease(ctx)
+	release, err := parsePinnedRelease(manifest)
 	if err != nil {
 		return "", err
 	}
-	assetName, archiveExt, err := mihomoAssetName(runtime.GOOS, runtime.GOARCH, release.TagName)
+	asset, err := release.asset(goos, goarch)
 	if err != nil {
 		return "", err
 	}
-	var assetURL string
-	var assetDigest string
-	for _, asset := range release.Assets {
-		if asset.Name == assetName {
-			assetURL = asset.BrowserDownloadURL
-			assetDigest = asset.Digest
-			break
+	githubURL := "https://github.com/" + mihomoRepo + "/releases/download/" + release.Version + "/" + asset.Name
+	source := "GitHub"
+	archive, err := download(ctx, githubURL, 30*time.Second)
+	if ctx.Err() != nil {
+		return "", ctx.Err()
+	}
+	var unavailable *sourceUnavailable
+	if err != nil && ctx.Err() == nil && errors.As(err, &unavailable) {
+		if progress != nil {
+			progress(DownloadProgress{Source: "S3", Fallback: true, Reason: err.Error()})
+		}
+		source = "S3"
+		archive, err = download(ctx, distributionRoot+"/mihomo/releases/"+release.Version+"/"+asset.Name, 180*time.Second)
+		if err != nil {
+			return "", errors.Join(unavailable, fmt.Errorf("S3 Mihomo download: %w", err))
 		}
 	}
-	if assetURL == "" {
-		return "", fmt.Errorf("Mihomo release %s has no asset for %s/%s", release.TagName, runtime.GOOS, runtime.GOARCH)
-	}
-	archive, err := downloadMihomoAsset(ctx, assetURL)
 	if err != nil {
 		return "", err
 	}
-	if err := verifyMihomoAsset(archive, assetDigest); err != nil {
+	if err := ctx.Err(); err != nil {
 		return "", err
 	}
-	binary, err := unpackMihomo(archive, archiveExt)
+	if err := verifyMihomoAsset(archive, "sha256:"+asset.SHA256); err != nil {
+		return "", err
+	}
+	binary, err := unpackMihomo(archive, asset.Format)
 	if err != nil {
+		return "", err
+	}
+	if err := ctx.Err(); err != nil {
 		return "", err
 	}
 	if err := os.MkdirAll(binaryDir, 0700); err != nil {
@@ -128,6 +147,9 @@ func InstallMihomo(ctx context.Context, binaryDir string) (string, error) {
 	}
 	if err := writeBinary(path, binary); err != nil {
 		return "", err
+	}
+	if progress != nil {
+		progress(DownloadProgress{Source: source})
 	}
 	return path, nil
 }
@@ -148,67 +170,29 @@ func verifyMihomoAsset(data []byte, digest string) error {
 	return nil
 }
 
-func mihomoAssetName(goos, goarch, version string) (string, string, error) {
-	if goos != "linux" && goos != "darwin" && goos != "windows" {
-		return "", "", fmt.Errorf("Mihomo is not supported on %s", goos)
-	}
-	if goarch != "amd64" && goarch != "arm64" {
-		return "", "", fmt.Errorf("Mihomo is not supported on %s/%s", goos, goarch)
-	}
-	extension := ".gz"
-	if goos == "windows" {
-		extension = ".zip"
-	}
-	return fmt.Sprintf("mihomo-%s-%s-%s%s", goos, goarch, version, extension), extension, nil
-}
+type sourceUnavailable struct{ reason string }
 
-func latestMihomoRelease(ctx context.Context) (githubRelease, error) {
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet,
-		"https://api.github.com/repos/"+mihomoRepo+"/releases/latest", nil)
-	if err != nil {
-		return githubRelease{}, errors.New("create Mihomo release request")
-	}
-	request.Header.Set("Accept", "application/vnd.github+json")
-	request.Header.Set("User-Agent", "miocli")
-	client := githubHTTPClient(30 * time.Second)
-	response, err := client.Do(request)
-	if err != nil {
-		if ctx.Err() != nil {
-			return githubRelease{}, ctx.Err()
-		}
-		return githubRelease{}, errors.New("could not check the latest Mihomo release")
-	}
-	defer response.Body.Close()
-	if response.StatusCode != http.StatusOK {
-		return githubRelease{}, fmt.Errorf("Mihomo release lookup returned HTTP %d", response.StatusCode)
-	}
-	data, err := io.ReadAll(io.LimitReader(response.Body, maxReleaseBytes+1))
-	if err != nil {
-		if ctx.Err() != nil {
-			return githubRelease{}, ctx.Err()
-		}
-		return githubRelease{}, errors.New("could not read Mihomo release metadata")
-	}
-	if len(data) > maxReleaseBytes {
-		return githubRelease{}, errors.New("Mihomo release metadata exceeds 4 MiB")
-	}
-	var release githubRelease
-	if err := json.Unmarshal(data, &release); err != nil {
-		return githubRelease{}, fmt.Errorf("decode Mihomo release metadata: %w", err)
-	}
-	if release.TagName == "" {
-		return githubRelease{}, errors.New("Mihomo release metadata has no version")
-	}
-	return release, nil
-}
+func (err *sourceUnavailable) Error() string { return err.reason }
 
-func githubHTTPClient(timeout time.Duration) *http.Client {
+func downloadHTTPClient(timeout time.Duration, mirror bool) *http.Client {
+	dialTimeout := 8 * time.Second
+	if mirror {
+		dialTimeout = 15 * time.Second
+	}
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.DialContext = (&net.Dialer{Timeout: dialTimeout}).DialContext
+	transport.TLSHandshakeTimeout = dialTimeout
 	return &http.Client{
-		Timeout: timeout,
+		Timeout:   timeout,
+		Transport: transport,
 		CheckRedirect: func(request *http.Request, via []*http.Request) error {
 			host := strings.ToLower(request.URL.Hostname())
 			allowedHost := host == "github.com" || strings.HasSuffix(host, ".githubusercontent.com")
-			if len(via) >= 5 || request.URL.Scheme != "https" || !allowedHost {
+			if mirror {
+				allowedHost = host == "s3.usemayfly.tech" && strings.HasPrefix(request.URL.Path, "/public/mihomo/releases/")
+			}
+			if len(via) >= 5 || request.URL.Scheme != "https" || !allowedHost || request.URL.User != nil ||
+				(request.URL.Port() != "" && request.URL.Port() != "443") {
 				return errors.New("Mihomo download redirect is not allowed")
 			}
 			return nil
@@ -216,9 +200,16 @@ func githubHTTPClient(timeout time.Duration) *http.Client {
 	}
 }
 
-func downloadMihomoAsset(ctx context.Context, assetURL string) ([]byte, error) {
+func downloadMihomoAsset(ctx context.Context, assetURL string, timeout time.Duration) ([]byte, error) {
 	parsed, err := url.Parse(assetURL)
-	if err != nil || parsed.Scheme != "https" || strings.ToLower(parsed.Hostname()) != "github.com" {
+	if err != nil {
+		return nil, errors.New("Mihomo release contains an invalid binary URL")
+	}
+	mirror := parsed.Hostname() == "s3.usemayfly.tech"
+	if parsed.Scheme != "https" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" ||
+		(parsed.Port() != "" && parsed.Port() != "443") ||
+		(!mirror && parsed.Hostname() != "github.com") ||
+		(mirror && !strings.HasPrefix(parsed.Path, "/public/mihomo/releases/")) {
 		return nil, errors.New("Mihomo release contains an invalid binary URL")
 	}
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, parsed.String(), nil)
@@ -226,21 +217,51 @@ func downloadMihomoAsset(ctx context.Context, assetURL string) ([]byte, error) {
 		return nil, errors.New("create Mihomo binary request")
 	}
 	request.Header.Set("User-Agent", "miocli")
-	response, err := githubHTTPClient(2 * time.Minute).Do(request)
+	client := downloadHTTPClient(timeout, mirror)
+	defer client.CloseIdleConnections()
+	return readMihomoResponse(ctx, client, request)
+}
+
+func readMihomoResponse(ctx context.Context, client *http.Client, request *http.Request) ([]byte, error) {
+	response, err := client.Do(request)
 	if err != nil {
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
 		}
-		return nil, errors.New("Mihomo binary download failed")
+		// Redirect and TLS trust failures must not be disguised as availability failures.
+		var trust *tls.CertificateVerificationError
+		if errors.As(err, &trust) {
+			return nil, errors.New("Mihomo binary TLS certificate verification failed")
+		}
+		var network *net.OpError
+		var urlErr *url.Error
+		if errors.As(err, &network) || (errors.As(err, &urlErr) && urlErr.Timeout()) ||
+			errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
+			return nil, &sourceUnavailable{reason: "Mihomo binary transport failed or timed out"}
+		}
+		return nil, errors.New("Mihomo binary request rejected (TLS or redirect policy)")
 	}
 	defer response.Body.Close()
+	if response.StatusCode >= 400 {
+		return nil, &sourceUnavailable{reason: fmt.Sprintf("Mihomo binary download returned HTTP %d", response.StatusCode)}
+	}
 	if response.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("Mihomo binary download returned HTTP %d", response.StatusCode)
+		return nil, errors.New("Mihomo binary response must be HTTP 200")
+	}
+	if response.ContentLength > maxDownloadBytes {
+		return nil, errors.New("Mihomo binary archive exceeds 128 MiB")
 	}
 	data, err := io.ReadAll(io.LimitReader(response.Body, maxDownloadBytes+1))
 	if err != nil {
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
+		}
+		if errors.Is(err, io.ErrUnexpectedEOF) {
+			return nil, &sourceUnavailable{reason: "Mihomo binary transfer was interrupted"}
+		}
+		var network net.Error
+		if errors.As(err, &network) {
+			return nil, &sourceUnavailable{reason: "Mihomo binary transfer failed or timed out"}
 		}
 		return nil, errors.New("could not read Mihomo binary archive")
 	}

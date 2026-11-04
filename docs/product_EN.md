@@ -27,6 +27,12 @@ The interface has four English navigation entries: Subscriptions, Groups, Nodes 
 
 Timed-out writes are not replayed automatically. If state cannot be read back, the interface retains the last successfully read data and displays an error instead of reporting an unconfirmed operation as successful.
 
+## First-time installation and downloads
+
+Installers and missing-core downloads try GitHub first and automatically fall back to the project's public mirror on network/HTTP failure. Installer scripts also have a mirror entry point; see the [README](../README_EN.md). A resolved version never changes during fallback; invalid metadata, integrity failure or cancellation stops without replacing existing binaries.
+
+Each miocli release pins a tested Mihomo version and verifies downloads against embedded SHA-256 values instead of looking up upstream latest. Existing cores are reused first, and connection failures do not trigger downloads. This iteration adds neither offline installation nor bundled packages and does not mirror subscriptions, providers, rules or Geo data.
+
 ## Documentation
 
 - [Architecture and implementation](architecture_EN.md)
