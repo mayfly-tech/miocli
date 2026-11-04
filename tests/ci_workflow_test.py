@@ -44,6 +44,11 @@ class COSReleaseTests(unittest.TestCase):
             self.assertIn("${{ secrets." + name + " }}", self.workflow)
         self.assertNotIn("S3_ENDPOINT", self.workflow)
         self.assertNotIn("vars.", self.workflow)
+        self.assertNotIn("path: dist/*.*", self.workflow)
+        self.assertNotIn("files: release-assets/*\n", self.workflow)
+        for pattern in ("*.tar.gz", "*.zip", "*.sha256"):
+            self.assertIn("            dist/" + pattern + "\n", self.workflow)
+            self.assertIn("            release-assets/" + pattern + "\n", self.workflow)
 
     def test_prepares_paths_and_rejects_bad_input(self):
         script = self.workflow.split("      - name: Prepare COS files\n", 1)[1].split("        run: |\n", 1)[1]
@@ -62,13 +67,17 @@ class COSReleaseTests(unittest.TestCase):
                     archive.write_bytes(b"test package")
                     checksum = assets / (archive.name + ".sha256")
                     checksum.write_text(hashlib.sha256(archive.read_bytes()).hexdigest() + "  " + archive.name + "\n")
+                    unpacked = assets / f"miocli_1.2.3_{system}_{arch}"
+                    unpacked.mkdir()
+                    (unpacked / "miocli").write_bytes(b"unpacked binary")
             env = dict(os.environ, RELEASE_TAG="v1.2.3", S3_BUCKET="example-123456",
                        S3_REGION="ap-example", S3_KEY_PREFIX="public/", S3_ACCESS_KEY_ID="test",
                        S3_SECRET_ACCESS_KEY="test", GITHUB_OUTPUT=str(root / "outputs"))
             result = subprocess.run(["bash", "-e", "-c", script], cwd=root, env=env, capture_output=True, text=True)
             self.assertEqual(result.returncode, 0, result.stderr)
             releases = root / "cos-files/miocli/releases/v1.2.3"
-            self.assertEqual(sorted(path.name for path in releases.iterdir()), sorted(path.name for path in assets.iterdir()))
+            self.assertEqual(sorted(path.name for path in releases.iterdir()),
+                             sorted(path.name for path in assets.iterdir() if path.is_file()))
             self.assertEqual(len(list(releases.iterdir())), 14)
             self.assertFalse((root / "cos-files/miocli/stable.txt").exists())
             self.assertEqual((root / "cos-stable/miocli/stable.txt").read_text(), "v1.2.3\n")
