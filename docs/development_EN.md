@@ -97,16 +97,16 @@ Release archives export third-party licenses for each target platform without sk
 
 Tag builds still create draft GitHub Releases. Publishing a stable Release triggers `publish-s3.yml` in the protected `s3-release` environment, synchronizing existing Release files without rebuilding binaries. A workflow_dispatch run can retry a previously published stable tag; older tags never downgrade the stable index.
 
-Environment configuration (never place credentials in source or clients):
+Use GitHub Actions Secrets for all environment configuration. Set the following under `Settings → Environments → s3-release → Environment secrets`; the workflow does not read Variables with the same names. `S3_KEY_PREFIX` and `S3_REGION` are optional; all other entries are required. Never place credentials in source or clients.
 
 Public documentation records configuration names and generic publication conventions only, not actual storage API endpoints, bucket names, account identifiers, deployment locations, credential values or internal network details. Manage actual settings through the GitHub publishing environment, and redact issues, pull requests, logs and screenshots. The `example.com` domain below is illustrative, not a working download source.
 
 | Type | Name | Purpose |
 | --- | --- | --- |
-| Variable | `S3_ENDPOINT` | HTTPS S3-compatible API endpoint, not the public download URL |
-| Variable | `S3_BUCKET` | Destination bucket |
-| Variable | `S3_KEY_PREFIX` | Optional object key prefix mapped to the public root |
-| Variable | `S3_REGION` | Optional region; defaults to `us-east-1` |
+| Secret | `S3_ENDPOINT` | HTTPS S3-compatible API endpoint, not the public download URL |
+| Secret | `S3_BUCKET` | Destination bucket |
+| Secret | `S3_KEY_PREFIX` | Optional object key prefix mapped to the public root |
+| Secret | `S3_REGION` | Optional region; defaults to `us-east-1` |
 | Secret | `S3_ACCESS_KEY_ID` | CI uploads only |
 | Secret | `S3_SECRET_ACCESS_KEY` | CI uploads only |
 

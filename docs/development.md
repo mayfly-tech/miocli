@@ -97,16 +97,16 @@ go test -race -count=1 -run '^TestIsolatedS3Bootstrap$' ./internal/core
 
 标签构建仍创建 GitHub 草稿 Release。正式发布稳定版本后，`publish-s3.yml` 在受保护的 `s3-release` 环境同步已经生成的 Release 文件，不重新构建二进制。也可通过 workflow_dispatch 指定已正式发布的稳定标签重试；旧版本不会降级稳定索引。
 
-环境配置（不要将凭据写入源码或客户端）：
+环境配置统一使用 GitHub Actions Secrets，在 `Settings → Environments → s3-release → Environment secrets` 中设置以下项目；工作流不读取同名 Variables。`S3_KEY_PREFIX` 和 `S3_REGION` 可不设置，其余项目必填。不要将凭据写入源码或客户端。
 
 公开文档只记录配置项名称和通用发布约定，不记录实际存储 API 地址、桶名、账号标识、区域部署、凭据值或内部网络信息。实际配置通过 GitHub 发布环境管理；Issue、PR、日志和截图也需脱敏。下文使用 `example.com` 示例域名，不代表可用下载源。
 
 | 类型 | 名称 | 用途 |
 | --- | --- | --- |
-| Variable | `S3_ENDPOINT` | S3 兼容 API 的 HTTPS endpoint，不是公开下载 URL |
-| Variable | `S3_BUCKET` | 目标桶 |
-| Variable | `S3_KEY_PREFIX` | 可选对象键前缀，与公开根路径对应 |
-| Variable | `S3_REGION` | 可选区域，默认 `us-east-1` |
+| Secret | `S3_ENDPOINT` | S3 兼容 API 的 HTTPS endpoint，不是公开下载 URL |
+| Secret | `S3_BUCKET` | 目标桶 |
+| Secret | `S3_KEY_PREFIX` | 可选对象键前缀，与公开根路径对应 |
+| Secret | `S3_REGION` | 可选区域，默认 `us-east-1` |
 | Secret | `S3_ACCESS_KEY_ID` | 仅 CI 上传使用 |
 | Secret | `S3_SECRET_ACCESS_KEY` | 仅 CI 上传使用 |
 

@@ -14,6 +14,18 @@ publisher = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(publisher)
 
 
+class WorkflowConfigurationTests(unittest.TestCase):
+    def test_s3_configuration_uses_secrets(self):
+        workflow = (ROOT / ".github/workflows/publish-s3.yml").read_text()
+        for name in ("S3_ENDPOINT", "S3_BUCKET", "S3_KEY_PREFIX",
+                     "S3_ACCESS_KEY_ID", "S3_SECRET_ACCESS_KEY"):
+            with self.subTest(name=name):
+                self.assertIn("${{ secrets." + name + " }}", workflow)
+        self.assertIn("AWS_DEFAULT_REGION: ${{ secrets.S3_REGION || 'us-east-1' }}", workflow)
+        self.assertNotIn("vars.", workflow)
+        self.assertIn("environment: s3-release", workflow)
+
+
 class FakeStorage:
     def __init__(self, previous=None, failure=None):
         self.previous = previous
