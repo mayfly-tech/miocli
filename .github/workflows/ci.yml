@@ -1,0 +1,149 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        go-version: ["1.24.x", stable]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check shell installer syntax
+        run: sh -n install.sh
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ matrix.go-version }}
+          cache: true
+      - name: Check formatting
+        run: |
+          files="$(gofmt -l $(git ls-files '*.go'))"
+          if [ -n "$files" ]; then
+            printf '%s\n' "$files"
+            exit 1
+          fi
+      - name: Vet
+        run: go vet ./...
+      - name: Test
+        run: go test -race ./...
+      - name: Check dependency licenses
+        run: |
+          go install github.com/google/go-licenses@v1.6.0
+          "$(go env GOPATH)/bin/go-licenses" check ./...
+
+  cross-build:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        goos: [linux, darwin, windows]
+        goarch: [amd64, arm64]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+          cache: true
+      - name: Cross-build
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+        run: go build -trimpath -o "/tmp/miocli-${GOOS}-${GOARCH}" ./cmd/miocli
+
+  native-startup:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+          cache: true
+      - name: Test configuration and startup on the native platform
+        run: go test -race ./internal/config ./internal/core ./internal/cli
+      - name: Test Shell installer behavior
+        if: runner.os != 'Windows'
+        run: sh tests/installers/shell.sh
+      - name: Test PowerShell installer behavior
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./tests/installers/powershell.ps1
+
+  installer-syntax:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Parse PowerShell installer
+        shell: pwsh
+        run: |
+          $tokens = $null
+          $errors = $null
+          [System.Management.Automation.Language.Parser]::ParseFile("$PWD/install.ps1", [ref]$tokens, [ref]$errors) | Out-Null
+          if ($errors.Count -gt 0) {
+            $errors | ForEach-Object { Write-Error $_ }
+            exit 1
+          }
+
+  mihomo-integration:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+          cache: true
+      - name: Test against current and previous stable Mihomo
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tags="$(curl -fsSL \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/MetaCubeX/mihomo/releases?per_page=100" \
+            | jq -r '[.[] | select(.draft == false and .prerelease == false) | .tag_name] | .[:2][]')"
+          if [ "$(printf '%s\n' "$tags" | wc -l | tr -d ' ')" -ne 2 ]; then
+            echo "Could not resolve current and previous stable Mihomo release tags"
+            exit 1
+          fi
+          for tag in $tags; do
+            container="miocli-mihomo-${tag//[^a-zA-Z0-9]/-}"
+            trap 'docker rm -f "$container" >/dev/null 2>&1 || true' EXIT
+            docker run --detach --network host \
+              --name "$container" \
+              --volume "$PWD/.github/fixtures/mihomo.yaml:/root/.config/mihomo/config.yaml:ro" \
+              --volume "$PWD/.github/fixtures/provider.yaml:/root/.config/mihomo/provider.yaml:ro" \
+              "metacubex/mihomo:${tag}"
+            ready=0
+            for attempt in $(seq 1 30); do
+              if curl -fsS -H "Authorization: Bearer ctm-ci-secret" \
+                http://127.0.0.1:19090/version >/dev/null; then
+                ready=1
+                break
+              fi
+              sleep 1
+            done
+            if [ "$ready" -ne 1 ]; then
+              docker logs "$container"
+              exit 1
+            fi
+            MIOCLI_INTEGRATION_URL=http://127.0.0.1:19090 \
+            MIOCLI_INTEGRATION_SECRET=miocli-ci-secret \
+            MIOCLI_INTEGRATION_CONFIG=/root/.config/mihomo/config.yaml \
+              go test -count=1 -run '^TestMihomoIntegration$' ./internal/mihomo
+            docker rm -f "$container"
+            trap - EXIT
+          done

@@ -1,0 +1,119 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+jobs:
+  preflight:
+    uses: ./.github/workflows/ci.yml
+    permissions:
+      contents: read
+
+  build:
+    needs: preflight
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - goos: linux
+            goarch: amd64
+            extension: ""
+            archive: tar.gz
+          - goos: linux
+            goarch: arm64
+            extension: ""
+            archive: tar.gz
+          - goos: darwin
+            goarch: amd64
+            extension: ""
+            archive: tar.gz
+          - goos: darwin
+            goarch: arm64
+            extension: ""
+            archive: tar.gz
+          - goos: windows
+            goarch: amd64
+            extension: ".exe"
+            archive: zip
+          - goos: windows
+            goarch: arm64
+            extension: ".exe"
+            archive: zip
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+          cache: true
+      - name: Install license export tool
+        run: go install github.com/google/go-licenses@v1.6.0
+      - name: Build and package
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          EXTENSION: ${{ matrix.extension }}
+          ARCHIVE: ${{ matrix.archive }}
+          COMMIT: ${{ github.sha }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          if [[ ! "$REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([+-][A-Za-z0-9.-]+)?$ ]]; then
+            echo "Tag must be a semantic version: vMAJOR.MINOR.PATCH"
+            exit 1
+          fi
+          version="${REF_NAME#v}"
+          build_date="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+          name="miocli_${version}_${GOOS}_${GOARCH}"
+          mkdir -p "dist/${name}"
+          CGO_ENABLED=0 go build -trimpath \
+            -ldflags "-s -w -X miocli/internal/cli.version=${version} -X miocli/internal/cli.commit=${COMMIT} -X miocli/internal/cli.buildDate=${build_date}" \
+            -o "dist/${name}/miocli${EXTENSION}" ./cmd/miocli
+          "$(go env GOPATH)/bin/go-licenses" save ./cmd/miocli --save_path="dist/${name}/THIRD_PARTY_LICENSES"
+          cp README.md README_EN.md LICENSE "dist/${name}/"
+          if [ "$ARCHIVE" = "zip" ]; then
+            (cd dist && zip -q -r "${name}.zip" "$name" && sha256sum "${name}.zip" > "${name}.zip.sha256")
+          else
+            (cd dist && tar -czf "${name}.tar.gz" "$name" && sha256sum "${name}.tar.gz" > "${name}.tar.gz.sha256")
+          fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: dist/*.*
+          if-no-files-found: error
+
+  installers:
+    needs: preflight
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure installer repository
+        run: |
+          mkdir -p dist
+          sed "s|__MIOCLI_REPOSITORY__|${GITHUB_REPOSITORY}|g" install.sh > dist/install.sh
+          sed "s|__MIOCLI_REPOSITORY__|${GITHUB_REPOSITORY}|g" install.ps1 > dist/install.ps1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-installers
+          path: dist/install.*
+          if-no-files-found: error
+
+  draft:
+    needs: [build, installers]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+          merge-multiple: true
+      - uses: softprops/action-gh-release@v2
+        with:
+          draft: true
+          generate_release_notes: true
+          files: release-assets/*

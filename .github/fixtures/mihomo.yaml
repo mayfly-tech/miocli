@@ -1,0 +1,19 @@
+log-level: silent
+mode: rule
+external-controller: 127.0.0.1:19090
+secret: miocli-ci-secret
+proxies: []
+proxy-providers:
+  MIOCLI-Provider:
+    type: file
+    path: ./provider.yaml
+proxy-groups:
+  - name: MIOCLI-Selector
+    type: select
+    proxies:
+      - DIRECT
+      - REJECT
+    use:
+      - MIOCLI-Provider
+rules:
+  - MATCH,DIRECT
