@@ -36,11 +36,12 @@ Bubble Tea commands run network requests asynchronously and return typed message
 
 ## Release distribution
 
-- The POSIX installer resolves the canonical GitHub latest-release redirect without a new JSON dependency; PowerShell uses the GitHub Release API. Network/HTTP failure during lookup switches to S3 `miocli/stable.txt`.
-- Archive and checksum form one source-specific pair. Eligible GitHub download failure redownloads both from S3 at the same version; integrity failure never falls back. S3 redirects are disabled in installers.
+- The POSIX installer resolves the canonical GitHub latest-release redirect without a new JSON dependency; PowerShell uses the GitHub Release API. Explicit versions skip lookup.
+- Packages and SHA-256 files are downloaded only from GitHub. Version, network and integrity errors stop installation without replacing the existing CLI.
 - `internal/core/mihomo-release.json` is the single pinned version, six-platform filename and SHA-256 manifest, embedded by Go. Core downloads accept only official GitHub, with redirect, deadline and body-size limits.
-- Availability errors are distinct from integrity/policy errors. Setup displays the pinned version and verified source without changing confirmation or process ownership. There is no Mihomo S3 fallback.
-- Stable-tag builds create draft Releases, then upload miocli packages and scripts using COS Action in the same workflow, with stable uploaded last. Historical objects remain, but there are no conflict or downgrade checks; rerunning an older tag can overwrite stable entry points.
+- Availability errors are distinct from integrity/policy errors. Setup displays the pinned version and verified source without changing confirmation or process ownership.
+- Conventional Commits on `main` drive release-please to create a release PR updating the manifest and changelog. Merging it automatically creates a `vX.Y.Z` tag and published GitHub Release.
+- The same workflow uses release-please's SHA for CI, six-platform builds and installer generation, then verifies and uploads assets to that Release. The default token does not trigger additional tag/release workflows; installation is unavailable between Release creation and asset upload completion.
 
 Distribution and controller API network policies are separate; the control API still ignores environment proxies. Distribution uses HTTPS. Co-hosted checksums do not replace independent signatures; package signing is not included.
 

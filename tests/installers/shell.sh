@@ -43,30 +43,26 @@ while [ "$#" -gt 0 ]; do
 done
 printf '%s\n' "$url" >> "$INSTALLER_TEST_LOG"
 case "$url" in
-  https://github.com/*) source=github ;;
-  https://s3.usemayfly.tech/public/*) source=s3 ;;
+  https://github.com/example/miocli/*) ;;
   *) printf 'Unexpected source: %s\n' "$url" >&2; exit 1 ;;
 esac
-case "$source:$url" in
-  github:*/releases/latest) [ "$connect:$limit" = 5:15 ] ;;
-  github:*) [ "$connect:$limit" = 8:30 ] ;;
-  s3:*.tar.gz) [ "$connect:$limit" = 15:180 ] ;;
-  s3:*) [ "$connect:$limit" = 15:60 ] ;;
+case "$url" in
+  */releases/latest) [ "$connect:$limit" = 5:15 ] ;;
+  *) [ "$connect:$limit" = 8:30 ] ;;
 esac
-case "$INSTALLER_TEST_SCENARIO:$source:$url" in
-  latest:github:*/releases/latest) exit 28 ;;
-  archive:github:*.tar.gz) printf partial > "$out"; exit 7 ;;
-  checksum:github:*.sha256) exit 22 ;;
-  trust:github:*) exit 60 ;;
-  cancelled:github:*) exit 130 ;;
-  both:*:*) exit 7 ;;
-  badlatest:github:*/releases/latest) printf 'https://evil.test/tag/v1.2.3'; exit 0 ;;
-  lag:github:*/releases/latest) printf 'https://github.com/example/miocli/releases/tag/v1.2.4'; exit 0 ;;
-  lag:*:*/v1.2.4/*) exit 22 ;;
+case "$INSTALLER_TEST_SCENARIO:$url" in
+  latest:*/releases/latest) exit 28 ;;
+  archive:*.tar.gz) printf partial > "$out"; exit 7 ;;
+  checksum:*.sha256) exit 22 ;;
+  trust:*) exit 60 ;;
+  cancelled:*) exit 130 ;;
+  badlatest:*/releases/latest) printf 'https://evil.test/tag/v1.2.3'; exit 0 ;;
+  badversion:*/releases/latest) printf 'https://github.com/example/miocli/releases/tag/not-a-version'; exit 0 ;;
+  lag:*/releases/latest) printf 'https://github.com/example/miocli/releases/tag/v1.2.4'; exit 0 ;;
+  lag:*/v1.2.4/*) exit 22 ;;
 esac
 case "$url" in
   */releases/latest) printf 'https://github.com/example/miocli/releases/tag/v1.2.3' ;;
-  */stable.txt) printf 'v1.2.3\n' > "$out" ;;
   *.sha256) cp "$INSTALLER_TEST_CHECKSUM" "$out" ;;
   *.tar.gz) cp "$INSTALLER_TEST_ARCHIVE" "$out" ;;
   *) printf 'Unexpected URL: %s\n' "$url" >&2; exit 1 ;;
@@ -78,7 +74,7 @@ sh "$root/install.sh" --help > "$work/output"
 env -u HOME -u MIOCLI_INSTALL_DIR sh "$root/install.sh" --help > "$work/output"
 sh "$root/install.sh" --non-interactive > "$work/output"
 [ "$(wc -l < "$INSTALLER_TEST_LOG" | tr -d ' ')" -eq 3 ]
-! grep -q s3.usemayfly "$INSTALLER_TEST_LOG"
+grep -q 'from GitHub' "$work/output"
 [ "$(cat "$MIOCLI_INSTALL_DIR/miocli")" = new-cli ]
 grep -q 'PATH was not modified' "$work/output"
 grep -Fq '"$PATH"' "$work/output"
@@ -90,6 +86,7 @@ if sh "$root/install.sh" v1.2.3 --non-interactive > "$work/output" 2>&1; then
 fi
 grep -q 'requires --yes' "$work/output"
 [ "$(cat "$MIOCLI_INSTALL_DIR/miocli")" = old-cli ]
+[ "$(wc -l < "$INSTALLER_TEST_LOG" | tr -d ' ')" -eq 3 ]
 sh "$root/install.sh" --version 1.2.3 --yes --non-interactive > "$work/output"
 [ "$(cat "$MIOCLI_INSTALL_DIR/miocli")" = new-cli ]
 printf 'old-cli\n' > "$MIOCLI_INSTALL_DIR/miocli"
@@ -104,21 +101,7 @@ if sh "$root/install.sh" v1.2.3 --setup --non-interactive > "$work/output" 2>&1;
 grep -q 'requires an interactive terminal' "$work/output"
 if sh "$root/install.sh" --install-dir relative --non-interactive > "$work/output" 2>&1; then exit 1; fi
 printf '%s  %s.tar.gz\n' "$hash" "$name" > "$work/checksum"
-for scenario in latest archive checksum; do
-  export INSTALLER_TEST_SCENARIO="$scenario"
-  : > "$INSTALLER_TEST_LOG"
-  sh "$root/install.sh" --yes --non-interactive > "$work/output" 2>&1
-  grep -q 'from S3' "$work/output"
-  [ "$(cat "$MIOCLI_INSTALL_DIR/miocli")" = new-cli ]
-  [ "$(grep -c 's3.usemayfly.*tar.gz' "$INSTALLER_TEST_LOG")" -eq 2 ]
-  if [ "$scenario" = latest ]; then
-    [ "$(grep -c github.com "$INSTALLER_TEST_LOG")" -eq 1 ]
-    grep -q stable.txt "$INSTALLER_TEST_LOG"
-  else
-    ! grep -q stable.txt "$INSTALLER_TEST_LOG"
-  fi
-done
-for scenario in trust cancelled badlatest both lag; do
+for scenario in latest archive checksum trust cancelled badlatest badversion lag; do
   export INSTALLER_TEST_SCENARIO="$scenario"
   : > "$INSTALLER_TEST_LOG"
   printf 'old-cli\n' > "$MIOCLI_INSTALL_DIR/miocli"
@@ -126,19 +109,33 @@ for scenario in trust cancelled badlatest both lag; do
     printf 'Installer accepted failure scenario %s\n' "$scenario" >&2; exit 1
   fi
   [ "$(cat "$MIOCLI_INSTALL_DIR/miocli")" = old-cli ]
-  case "$scenario" in trust|cancelled|badlatest) ! grep -q s3.usemayfly "$INSTALLER_TEST_LOG" ;; esac
+  case "$scenario" in
+    latest|trust|cancelled|badlatest|badversion) expected_requests=1 ;;
+    archive|lag) expected_requests=2 ;;
+    checksum) expected_requests=3 ;;
+  esac
+  [ "$(wc -l < "$INSTALLER_TEST_LOG" | tr -d ' ')" -eq "$expected_requests" ]
   if [ "$scenario" = lag ]; then
-    ! grep -q stable.txt "$INSTALLER_TEST_LOG"
     ! grep -q '/v1.2.3/' "$INSTALLER_TEST_LOG"
   fi
 done
 export INSTALLER_TEST_SCENARIO=archive
 : > "$INSTALLER_TEST_LOG"
-sh "$root/install.sh" --version v1.2.3 --yes --non-interactive > "$work/output" 2>&1
-! grep -Eq 'releases/latest|stable.txt' "$INSTALLER_TEST_LOG"
+if sh "$root/install.sh" --version v1.2.3 --yes --non-interactive > "$work/output" 2>&1; then exit 1; fi
+! grep -q 'releases/latest' "$INSTALLER_TEST_LOG"
+[ "$(wc -l < "$INSTALLER_TEST_LOG" | tr -d ' ')" -eq 1 ]
+[ "$(cat "$MIOCLI_INSTALL_DIR/miocli")" = old-cli ]
 export INSTALLER_TEST_SCENARIO=""
 : > "$INSTALLER_TEST_LOG"
+if sh "$root/install.sh" --version ../invalid --yes --non-interactive > "$work/output" 2>&1; then exit 1; fi
+[ ! -s "$INSTALLER_TEST_LOG" ]
+sh "$root/install.sh" --version v1.2.3 --yes --non-interactive > "$work/output" 2>&1
+[ "$(wc -l < "$INSTALLER_TEST_LOG" | tr -d ' ')" -eq 2 ]
+! grep -q 'releases/latest' "$INSTALLER_TEST_LOG"
+: > "$INSTALLER_TEST_LOG"
+printf 'old-cli\n' > "$MIOCLI_INSTALL_DIR/miocli"
 printf '%064d  %s.tar.gz\n' 0 "$name" > "$work/checksum"
 if sh "$root/install.sh" v1.2.3 --yes --non-interactive > "$work/output" 2>&1; then exit 1; fi
-! grep -q s3.usemayfly "$INSTALLER_TEST_LOG"
+[ "$(wc -l < "$INSTALLER_TEST_LOG" | tr -d ' ')" -eq 2 ]
+[ "$(cat "$MIOCLI_INSTALL_DIR/miocli")" = old-cli ]
 printf 'Shell installer behavior tests passed.\n'

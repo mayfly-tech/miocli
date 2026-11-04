@@ -17,19 +17,20 @@
 
 ### 安装
 
-从 GitHub Release 下载对应安装脚本。GitHub 不可达时，可以从 S3 镜像获取脚本：
+从最新的 GitHub Release 下载对应安装脚本：
 
 ```sh
 # Linux / macOS：先下载到本地，再执行；不要将下载内容直接管道执行
-curl --fail --show-error --proto '=https' --connect-timeout 15 --max-time 60 \
-  https://s3.usemayfly.tech/public/miocli/install.sh -o install.sh
+curl --fail --show-error --location --proto '=https' --proto-redir '=https' \
+  --max-redirs 5 --connect-timeout 15 --max-time 60 \
+  https://github.com/mayfly-tech/miocli/releases/latest/download/install.sh -o install.sh
 ```
 
 ```powershell
 # Windows PowerShell
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-Invoke-WebRequest https://s3.usemayfly.tech/public/miocli/install.ps1 `
-  -OutFile install.ps1 -TimeoutSec 60 -MaximumRedirection 0 -UseBasicParsing
+Invoke-WebRequest https://github.com/mayfly-tech/miocli/releases/latest/download/install.ps1 `
+  -OutFile install.ps1 -TimeoutSec 60 -MaximumRedirection 5 -UseBasicParsing
 ```
 
 检查下载的脚本后安装：
@@ -44,7 +45,7 @@ powershell -ExecutionPolicy Bypass -File .\install.ps1
 
 安装器校验发布包 SHA-256，并将 CLI 安装到用户目录，不需要管理员权限。已有 Clash Verge 等客户端时，只需可访问的 Mihomo 控制 API；无需安装第二个内核。
 
-发布包始终优先从 GitHub 下载，网络失败、超时或 HTTP 错误时自动回退 S3 镜像。未指定版本时，GitHub 版本查询失败才读取 S3 的稳定版本索引；版本一旦确定，回退不会降级。指定 `--version vX.Y.Z`（PowerShell：`-Version vX.Y.Z`）可跳过版本查询。校验失败、非法版本、证书/重定向策略错误或取消不会触发回退；失败不会替换已有 CLI。S3 入口在稳定标签的 Release 工作流成功上传后可用，无需等待 GitHub 草稿正式发布，详见[发布配置](docs/development.md#s3-镜像发布)。
+安装器仅从 GitHub 下载发布包与 SHA-256 校验文件；未指定版本时查询最新正式版本。指定 `--version vX.Y.Z`（PowerShell：`-Version vX.Y.Z`）可跳过版本查询。网络、版本或校验错误会明确终止安装，不替换已有 CLI。Release 创建后仍需等待构建资产上传完成才能安装，详见[发布流程](docs/development.md#发布流程)。
 
 ### 连接已有内核
 
@@ -72,7 +73,7 @@ go run ./cmd/miocli dev
 
 在 setup 中明确选择 managed，并确认导入配置和下载（如需要）。miocli 管理所选配置的副本；运行时只停止本次启动的子进程。连接失败不会自动切换为托管模式。详见[产品说明](docs/product.md)。
 
-托管模式不修改源配置。导入前需关闭 TUN 和自定义监听，并确保相对路径引用的资源可用；缺少内核时，需单独确认下载。当前固定 Mihomo `v1.19.33`，仅从官方 GitHub Release 下载，并与内置 SHA-256 校验；不再提供 Mihomo S3 镜像兜底。GitHub 不可达时可指定已有本地内核。设置仅在配置验证成功后保存。
+托管模式不修改源配置。导入前需关闭 TUN 和自定义监听，并确保相对路径引用的资源可用；缺少内核时，需单独确认下载。当前固定 Mihomo `v1.19.33`，仅从官方 GitHub Release 下载，并与内置 SHA-256 校验。GitHub 不可达时可指定已有本地内核。设置仅在配置验证成功后保存。
 
 这是在线安装兜底，不是完整离线模式：订阅、providers、规则集和 Geo 数据仍可能需要网络；已有本地 Mihomo 可在 setup 中指定路径复用。
 
@@ -154,7 +155,7 @@ Subscriptions 中 `p` 切换档案与 providers；档案操作使用 `a` / `e` /
 
 miocli 不包含账号、遥测或后台自动更新检查。凭据只发送到配置的控制器。托管内核的下载需在 setup 中单独确认。配置和诊断日志可能包含敏感信息，分享前请检查并脱敏。漏洞请通过 GitHub Security Advisories 私下报告。
 
-下载使用经过证书验证的 HTTPS。miocli 发布包与校验文件同源，SHA-256 用于发现传输损坏，不能独立证明被篡改分发源的可信性；本版本未引入发布包签名。Mihomo 的预期校验值内置在 miocli 中。客户端不持有 S3 上传凭据。
+下载使用经过证书验证的 HTTPS。miocli 发布包与校验文件同源，SHA-256 用于发现传输损坏，不能独立证明被篡改分发源的可信性；本版本未引入发布包签名。Mihomo 的预期校验值内置在 miocli 中。
 
 ## 许可证
 

@@ -9,33 +9,6 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$s3Root = "https://s3.usemayfly.tech/public"
-
-function Test-AvailabilityFailure([Exception]$Exception) {
-    if ($Exception -is [System.Management.Automation.PipelineStoppedException]) { return $false }
-    if ($Exception -is [System.Net.WebException]) {
-        if ($Exception.Response -and [int]$Exception.Response.StatusCode -ge 400) { return $true }
-        return $Exception.Status -in @(
-            [System.Net.WebExceptionStatus]::ConnectFailure,
-            [System.Net.WebExceptionStatus]::NameResolutionFailure,
-            [System.Net.WebExceptionStatus]::ProxyNameResolutionFailure,
-            [System.Net.WebExceptionStatus]::ReceiveFailure,
-            [System.Net.WebExceptionStatus]::SendFailure,
-            [System.Net.WebExceptionStatus]::SecureChannelFailure,
-            [System.Net.WebExceptionStatus]::Timeout,
-            [System.Net.WebExceptionStatus]::ConnectionClosed
-        )
-    }
-    if ($Exception.PSObject.Properties["Response"] -and $Exception.Response -and
-        [int]$Exception.Response.StatusCode -ge 400) { return $true }
-    if ($Exception.PSObject.Properties["HttpRequestError"] -and
-        $Exception.HttpRequestError.ToString() -in @("NameResolutionError", "ConnectionError", "ResponseEnded")) { return $true }
-    if ($Exception -is [System.Net.Sockets.SocketException] -or
-        $Exception -is [System.TimeoutException] -or
-        $Exception -is [System.Threading.Tasks.TaskCanceledException]) { return $true }
-    if ($Exception.InnerException) { return Test-AvailabilityFailure $Exception.InnerException }
-    return $false
-}
 
 function Get-RequestTimeouts([string]$Command, [int]$Connect, [int]$Operation) {
     $parameters = (Get-Command "Microsoft.PowerShell.Utility\$Command").Parameters
@@ -49,7 +22,7 @@ if ($Help) {
     Write-Output "Usage: install.ps1 [-Version VERSION] [-InstallDir DIR] [-Yes] [-NonInteractive] [-Setup] [-Help]"
     Write-Output "Install only miocli. PATH and existing Mihomo/Clash Verge settings are never modified."
     Write-Output "MIOCLI_INSTALL_DIR overrides the user install directory. -Yes confirms CLI replacement only."
-    Write-Output "GitHub first; network/HTTP failures retry the same version from domestic S3."
+    Write-Output "Release packages and checksums are downloaded from GitHub over HTTPS."
     return
 }
 $repository = "__MIOCLI_REPOSITORY__"
@@ -86,27 +59,14 @@ switch ($architectureCode) {
     12 { $architecture = "arm64" }
     default { throw "Unsupported Windows processor architecture: $architectureCode" }
 }
-$source = "GitHub"
 if (-not $Version) {
     try {
         $timeouts = Get-RequestTimeouts "Invoke-RestMethod" 5 15
         $release = Invoke-RestMethod -Uri "https://api.github.com/repos/$repository/releases/latest" @timeouts
     } catch {
-        if (-not (Test-AvailabilityFailure $_.Exception)) {
-            throw "GitHub version request rejected; no fallback. $($_.Exception.Message)"
-        }
-        Write-Warning "GitHub version lookup unavailable; checking domestic S3 stable version."
-        $source = "S3"
-        try {
-            $timeouts = Get-RequestTimeouts "Invoke-WebRequest" 15 60
-            $release = Invoke-WebRequest -Uri "$s3Root/miocli/stable.txt" @timeouts -MaximumRedirection 0 -UseBasicParsing
-        } catch { throw "GitHub and S3 version lookup failed. $($_.Exception.Message)" }
+        throw "GitHub version lookup failed; existing CLI unchanged. $($_.Exception.Message)"
     }
-    if ($source -eq "GitHub") { $Version = $release.tag_name }
-    else {
-        $Version = ([string]$release.Content).TrimEnd("`r", "`n")
-        if ($Version -cnotmatch '^v[0-9]+\.[0-9]+\.[0-9]+$') { throw "S3 stable version is invalid." }
-    }
+    $Version = $release.tag_name
 }
 if ($Version -notmatch '^v?[0-9]+\.[0-9]+\.[0-9]+([+-][A-Za-z0-9.-]+)?\z') {
     throw "Version must be a semantic version such as v1.2.3."
@@ -123,36 +83,13 @@ try {
     New-Item -ItemType File -Path $staged | Out-Null
     $archivePath = Join-Path $temporaryDirectory $archive
     $checksumPath = "$archivePath.sha256"
-    function Get-PackagePair([string]$Source) {
+    try {
         $baseUrl = "https://github.com/$repository/releases/download/$Version"
-        $archiveTimeout = 30
-        $checksumTimeout = 30
-        $redirects = 5
-        $connectTimeout = 8
-        if ($Source -eq "S3") {
-            $baseUrl = "$s3Root/miocli/releases/$Version"
-            $archiveTimeout = 180
-            $checksumTimeout = 60
-            $redirects = 0
-            $connectTimeout = 15
-        }
-        $timeouts = Get-RequestTimeouts "Invoke-WebRequest" $connectTimeout $archiveTimeout
-        Invoke-WebRequest -Uri "$baseUrl/$archive" -OutFile $archivePath @timeouts -MaximumRedirection $redirects -UseBasicParsing | Out-Null
-        $timeouts = Get-RequestTimeouts "Invoke-WebRequest" $connectTimeout $checksumTimeout
-        Invoke-WebRequest -Uri "$baseUrl/$archive.sha256" -OutFile $checksumPath @timeouts -MaximumRedirection $redirects -UseBasicParsing | Out-Null
-    }
-    try { Get-PackagePair $source }
-    catch {
-        if ($source -ne "GitHub" -or -not (Test-AvailabilityFailure $_.Exception)) {
-            throw "$source download failed; existing CLI unchanged. $($_.Exception.Message)"
-        }
-        Write-Warning "GitHub download unavailable; retrying miocli $Version archive and checksum from domestic S3."
-        foreach ($partial in @($archivePath, $checksumPath)) {
-            if (Test-Path -LiteralPath $partial) { Remove-Item -LiteralPath $partial -Force }
-        }
-        $source = "S3"
-        try { Get-PackagePair $source }
-        catch { throw "GitHub and S3 downloads failed for $Version; existing CLI unchanged. $($_.Exception.Message)" }
+        $timeouts = Get-RequestTimeouts "Invoke-WebRequest" 8 30
+        Invoke-WebRequest -Uri "$baseUrl/$archive" -OutFile $archivePath @timeouts -MaximumRedirection 5 -UseBasicParsing | Out-Null
+        Invoke-WebRequest -Uri "$baseUrl/$archive.sha256" -OutFile $checksumPath @timeouts -MaximumRedirection 5 -UseBasicParsing | Out-Null
+    } catch {
+        throw "GitHub download failed for $Version; existing CLI unchanged. $($_.Exception.Message)"
     }
     $checksumLine = Get-Content -LiteralPath $checksumPath -Raw
     if ($checksumLine -notmatch '^\s*([0-9a-fA-F]{64})\s+(.+?)\s*$' -or $Matches[2] -ne $archive) {
@@ -178,7 +115,7 @@ try {
     } catch {
         throw "Could not replace CLI at $target. Close running miocli processes and retry. $($_.Exception.Message)"
     }
-    Write-Output "Installed miocli $Version from $source to $target"
+    Write-Output "Installed miocli $Version from GitHub to $target"
     Write-Output "Only miocli was installed. Existing Clash Verge/Mihomo users do not need a second core."
     if (($env:Path -split ';') -notcontains $InstallDir) {
         $quotedDir = $InstallDir.Replace("'", "''")

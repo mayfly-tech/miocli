@@ -36,11 +36,12 @@ cmd/miocli
 
 ## 发布分发
 
-- POSIX 安装器读取 GitHub latest 的规范版本重定向（不新增 JSON 解析依赖）；PowerShell 使用 GitHub Release API。版本查询的网络/HTTP 失败才改读 S3 `miocli/stable.txt`。
-- 发布包与校验文件作为同源下载对处理，GitHub 下载失败时从 S3 重新下载同版本的两份文件；校验失败不回退。S3 不允许重定向。
+- POSIX 安装器读取 GitHub latest 的规范版本重定向（不新增 JSON 解析依赖）；PowerShell 使用 GitHub Release API。显式版本跳过查询。
+- 发布包与 SHA-256 校验文件均从 GitHub 下载；版本、网络或校验错误会终止安装，不替换已有 CLI。
 - `internal/core/mihomo-release.json` 是内核版本、六个平台文件名和 SHA-256 的唯一清单，由 Go 内嵌。Mihomo 下载仅接受官方 GitHub，并限制重定向、请求时限和响应体大小。
-- 核心下载区分网络错误与校验/策略错误。setup 显示固定版本和验证来源，不改变确认或进程所有权规则；不再使用 Mihomo S3 兜底。
-- 稳定标签构建创建草稿 Release 后，在同一工作流通过 COS Action 上传 miocli 包和脚本，最后上传 stable。保留历史对象，但无冲突检查或防降级，重跑旧标签可能覆盖稳定入口。
+- 核心下载区分网络错误与校验/策略错误。setup 显示固定版本和验证来源，不改变确认或进程所有权规则。
+- `main` 的 Conventional Commits 驱动 release-please 创建发布 PR，更新 manifest 与变更日志。合并后自动创建 `vX.Y.Z` 标签及正式 GitHub Release。
+- 同一发布工作流使用 release-please 输出的 SHA 执行 CI、六平台构建与安装器生成，校验后上传到对应 Release。默认 Token 不触发额外的 Tag/Release 工作流；正式 Release 创建至资产上传完成之间暂不可安装。
 
 分发下载与控制 API 的网络策略不同；控制 API 仍不使用环境代理。分发使用 HTTPS；同源发布包校验不替代独立签名，当前不包含包签名。
 

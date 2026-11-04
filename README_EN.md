@@ -17,19 +17,20 @@
 
 ### Install
 
-Download the matching installer from a GitHub Release. If GitHub is unreachable, obtain it from the domestic S3 distribution:
+Download the matching installer from the latest GitHub Release:
 
 ```sh
 # Linux / macOS: download first; do not pipe network content into a shell
-curl --fail --show-error --proto '=https' --connect-timeout 15 --max-time 60 \
-  https://s3.usemayfly.tech/public/miocli/install.sh -o install.sh
+curl --fail --show-error --location --proto '=https' --proto-redir '=https' \
+  --max-redirs 5 --connect-timeout 15 --max-time 60 \
+  https://github.com/mayfly-tech/miocli/releases/latest/download/install.sh -o install.sh
 ```
 
 ```powershell
 # Windows PowerShell
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-Invoke-WebRequest https://s3.usemayfly.tech/public/miocli/install.ps1 `
-  -OutFile install.ps1 -TimeoutSec 60 -MaximumRedirection 0 -UseBasicParsing
+Invoke-WebRequest https://github.com/mayfly-tech/miocli/releases/latest/download/install.ps1 `
+  -OutFile install.ps1 -TimeoutSec 60 -MaximumRedirection 5 -UseBasicParsing
 ```
 
 Review the downloaded script, then install:
@@ -44,7 +45,7 @@ powershell -ExecutionPolicy Bypass -File .\install.ps1
 
 Installers verify the release archive's SHA-256 and install the CLI to a user directory without administrator privileges. Existing Clash Verge and other Mihomo users need only a reachable control API; no second core is required.
 
-Package downloads always try GitHub first, falling back to S3 only on network failure, timeout or HTTP error. Without an explicit version, a failed GitHub version lookup uses S3's stable index; once resolved, a version never changes during fallback. Use `--version vX.Y.Z` (PowerShell: `-Version vX.Y.Z`) to skip version lookup. Invalid metadata, checksum failure, certificate/redirect policy errors and cancellation do not trigger fallback; failures preserve the existing CLI. S3 entry points become available after successful uploads in the stable-tag Release workflow, without waiting for formal GitHub publication; see [publication setup](docs/development_EN.md#domestic-s3-publication).
+Installers download packages and SHA-256 files only from GitHub, looking up the latest published release unless a version is specified. Use `--version vX.Y.Z` (PowerShell: `-Version vX.Y.Z`) to skip version lookup. Network, version and integrity errors explicitly stop installation and preserve the existing CLI. After a Release is created, installation must wait for its build assets to finish uploading; see the [release workflow](docs/development_EN.md#release-workflow).
 
 ### Connect to an existing core
 
@@ -72,7 +73,7 @@ Set the existing controller address and secret in the local file. `dev` connects
 
 Choose managed mode in setup and confirm configuration import and any required download. miocli operates on a copy of the selected configuration and stops only a child process started by that invocation. Connection failures never switch to managed mode automatically. See the [product overview](docs/product_EN.md).
 
-Managed mode never edits the source configuration. Disable TUN and custom listeners before import, and make relative-path resources available. A missing core is downloaded only after separate confirmation. Mihomo is currently pinned to `v1.19.33`: downloads use only official GitHub and are verified against an embedded SHA-256. There is no Mihomo S3 fallback; select an existing local core when GitHub is unreachable. Settings are saved only after validation.
+Managed mode never edits the source configuration. Disable TUN and custom listeners before import, and make relative-path resources available. A missing core is downloaded only after separate confirmation. Mihomo is currently pinned to `v1.19.33`: downloads use only official GitHub and are verified against an embedded SHA-256. Select an existing local core when GitHub is unreachable. Settings are saved only after validation.
 
 This is online bootstrap, not full offline support: subscriptions, providers, rules and Geo data may still require network access. An existing local Mihomo executable can still be selected in setup.
 
@@ -154,7 +155,7 @@ In Subscriptions, `p` toggles profiles and providers. Profile actions use `a` / 
 
 miocli has no accounts, telemetry or background update checks. Credentials are sent only to the configured controller. Managed-core downloads require separate confirmation in setup. Configuration and diagnostic logs may contain sensitive information; inspect and redact them before sharing. Report vulnerabilities privately through GitHub Security Advisories.
 
-Downloads use certificate-validated HTTPS. miocli archives and checksums share a source: SHA-256 detects transfer corruption but does not independently authenticate a compromised distribution source; this version does not add package signing. Expected Mihomo digests are embedded in miocli. Clients never hold S3 upload credentials.
+Downloads use certificate-validated HTTPS. miocli archives and checksums share a source: SHA-256 detects transfer corruption but does not independently authenticate a compromised distribution source; this version does not add package signing. Expected Mihomo digests are embedded in miocli.
 
 ## License
 

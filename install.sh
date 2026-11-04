@@ -3,7 +3,6 @@ set -eu
 
 REPOSITORY="${MIOCLI_REPOSITORY:-__MIOCLI_REPOSITORY__}"
 BIN_NAME="miocli"
-S3_ROOT="https://s3.usemayfly.tech/public"
 
 fail() {
   printf 'miocli installer: %s\n' "$*" >&2
@@ -15,7 +14,7 @@ usage() {
   printf 'Install only miocli. Existing Mihomo/Clash Verge cores are not modified.\n'
   printf 'MIOCLI_INSTALL_DIR overrides the default ~/.local/bin. PATH is never modified.\n'
   printf '%s\n' '--yes confirms CLI replacement only, not Mihomo installation.'
-  printf 'GitHub is tried first; network/HTTP failure retries the same version from domestic S3.\n'
+  printf 'Release packages and checksums are downloaded from GitHub over HTTPS.\n'
 }
 
 version=""
@@ -96,31 +95,23 @@ trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' HUP TERM
 
-# Only curl availability failures may switch sources; trust and policy errors stop.
 fetch() {
-  source_name="$1"; request_limit="$2"; request_url="$3"; request_out="$4"
-  shift 4
-  connect_limit=8
-  redirects=5
-  if [ "$source_name" = S3 ]; then connect_limit=15; redirects=0; fi
-  if curl --proto '=https' --proto-redir '=https' --max-redirs "$redirects" \
-      --connect-timeout "$connect_limit" --max-time "$request_limit" -fsSL \
+  request_limit="$1"; request_url="$2"; request_out="$3"
+  shift 3
+  if curl --proto '=https' --proto-redir '=https' --max-redirs 5 \
+      --connect-timeout 8 --max-time "$request_limit" -fsSL \
       "$@" "$request_url" -o "$request_out"; then
     return 0
   else
     curl_status=$?
-    printf '%s request failed (curl exit %s).\n' "$source_name" "$curl_status" >&2
-    case "$curl_status" in
-      5|6|7|18|22|28|35|52|55|56) return 2 ;;
-      *) return 1 ;;
-    esac
+    printf 'GitHub request failed (curl exit %s).\n' "$curl_status" >&2
+    return 1
   fi
 }
 
-source=GitHub
 if [ -z "$version" ]; then
   # The canonical release redirect supplies the tag without a JSON parser dependency.
-  if fetch GitHub 15 "https://github.com/$REPOSITORY/releases/latest" /dev/null \
+  if fetch 15 "https://github.com/$REPOSITORY/releases/latest" /dev/null \
       --connect-timeout 5 --head --write-out '%{url_effective}' > "$tmp_dir/latest"; then
     latest_url="$(cat "$tmp_dir/latest")"
     case "$latest_url" in
@@ -128,15 +119,7 @@ if [ -z "$version" ]; then
       *) fail "GitHub latest release returned an invalid version destination" ;;
     esac
   else
-    status=$?
-    [ "$status" -eq 2 ] || fail "GitHub latest request rejected; no fallback"
-    printf 'GitHub unavailable; checking domestic S3 stable version.\n' >&2
-    source=S3
-    fetch S3 60 "$S3_ROOT/miocli/stable.txt" "$tmp_dir/latest" \
-      || fail "GitHub and S3 version lookup failed"
-    version="$(cat "$tmp_dir/latest")"
-    printf '%s\n' "$version" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$' \
-      || fail "S3 stable version is invalid"
+    fail "GitHub version lookup failed; existing CLI unchanged"
   fi
 fi
 case "$version" in v*) ;; *) version="v$version" ;; esac
@@ -148,29 +131,11 @@ archive="miocli_${version_number}_${os}_${arch}.tar.gz"
 printf 'Install miocli %s (%s/%s) to %s\n' "$version" "$os" "$arch" "$install_dir/$BIN_NAME"
 mkdir -p "$install_dir" || fail "could not create install directory: $install_dir"
 [ -w "$install_dir" ] || fail "install directory is not writable: $install_dir"
-fetch_pair() {
-  pair_source="$1"
-  pair_limit=30
-  base_url="https://github.com/$REPOSITORY/releases/download/$version"
-  if [ "$pair_source" = S3 ]; then
-    base_url="$S3_ROOT/miocli/releases/$version"
-    pair_limit=180
-  fi
-  fetch "$pair_source" "$pair_limit" "$base_url/$archive" "$tmp_dir/$archive" || return $?
-  checksum_limit=30
-  [ "$pair_source" != S3 ] || checksum_limit=60
-  fetch "$pair_source" "$checksum_limit" "$base_url/$archive.sha256" "$tmp_dir/$archive.sha256"
-}
-if fetch_pair "$source"; then
-  :
-else
-  status=$?
-  [ "$source" = GitHub ] && [ "$status" -eq 2 ] || fail "$source download failed; existing CLI unchanged"
-  printf 'GitHub unavailable; retrying miocli %s archive and checksum from domestic S3.\n' "$version" >&2
-  rm -f "$tmp_dir/$archive" "$tmp_dir/$archive.sha256"
-  source=S3
-  fetch_pair S3 || fail "GitHub and S3 downloads failed for $version; existing CLI unchanged"
-fi
+base_url="https://github.com/$REPOSITORY/releases/download/$version"
+fetch 30 "$base_url/$archive" "$tmp_dir/$archive" \
+  || fail "GitHub archive download failed for $version; existing CLI unchanged"
+fetch 30 "$base_url/$archive.sha256" "$tmp_dir/$archive.sha256" \
+  || fail "GitHub checksum download failed for $version; existing CLI unchanged"
 
 if command -v sha256sum >/dev/null 2>&1; then
   actual="$(sha256sum "$tmp_dir/$archive" | awk '{print $1}')"
@@ -197,7 +162,7 @@ install -m 0755 "$package_dir/$BIN_NAME" "$staged" \
 mv -f "$staged" "$install_dir/$BIN_NAME" \
   || fail "could not install $BIN_NAME to $install_dir"
 
-printf 'Installed %s %s from %s to %s\n' "$BIN_NAME" "$version" "$source" "$install_dir/$BIN_NAME"
+printf 'Installed %s %s from GitHub to %s\n' "$BIN_NAME" "$version" "$install_dir/$BIN_NAME"
 case ":${PATH:-}:" in
   *":$install_dir:"*) ;;
   *)

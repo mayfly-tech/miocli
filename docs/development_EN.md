@@ -91,42 +91,40 @@ MIOCLI_TEST_ARCHIVE=/absolute/path/to/pinned-mihomo.gz \
 go test -race -count=1 -run '^TestIsolatedPinnedBootstrap$' ./internal/core
 ```
 
-## Domestic S3 publication
+## Release workflow
+
+`release.yml` runs `googleapis/release-please-action` on pushes to `main`. `release-please-config.json` uses the single-package Go strategy, and `.release-please-manifest.json` tracks the published version with `v0.1.1` as the initial baseline. `bootstrap-sha` starts the first changelog after that version. Go ldflags inject the release version at build time; development builds display `dev`.
+
+1. Use Conventional Commits: `fix` produces a patch release, `feat` a minor release, and `!` or `BREAKING CHANGE` a major release. Changes containing only `ci`, `chore` or documentation commits do not normally create a release PR.
+2. release-please creates or updates a release PR changing the version manifest and `CHANGELOG.md`. Review the version and changelog, then merge; no manual tag is needed.
+3. After the release PR is merged, release-please creates a `vX.Y.Z` tag and published GitHub Release with generated release notes.
+4. The same workflow uses release-please's release SHA for full CI, Linux/macOS/Windows amd64/arm64 builds and both installers. After SHA-256 verification, it uploads all 14 assets to that Release.
+
+The published Release exists before its assets. Wait for the entire Release workflow to succeed before installing; latest installation may fail while assets are absent but preserves an existing CLI. Release runs are serialized without cancelling an ongoing release. Archives retain `miocli_X.Y.Z_OS_ARCH.tar.gz` names (`.zip` on Windows), each accompanied by a matching `.sha256` file.
 
 Release archives export third-party licenses for each target platform without skipping Windows-only dependencies. `go-localereader` is pinned to `v0.0.2-0.20220822084737-6bae6c923850`: compared with `v0.0.1`, this commit only adds the upstream LICENSE with no code changes, preventing Windows packaging failures due to a missing license.
 
-After a tag build succeeds and creates a draft GitHub Release, `release.yml` uploads existing build artifacts directly using `TencentCloud/cos-action`, without rebuilding. Only stable tags upload to COS; S3 becomes available before the GitHub Release is formally published. Retry failed upload jobs in the Release workflow. There is no separate publication workflow or Python publisher.
+### Permissions and checks
 
-Use GitHub Actions Secrets for all environment configuration. Set the following under `Settings → Environments → s3-release → Environment secrets`; the workflow does not read Variables with the same names. Only `S3_KEY_PREFIX` is optional; all other entries are required. Never place credentials in source or clients.
+The workflow uses the default `GITHUB_TOKEN` without extra publishing credentials. The release-please job has `contents`, `issues` and `pull-requests` write permissions; upload has only `contents` write permission, and other jobs are read-only. Enable GitHub Actions pull request creation under repository `Settings → Actions → General`.
 
-Public documentation records configuration names and generic publication conventions only, not actual storage API endpoints, bucket names, account identifiers, deployment locations, credential values or internal network details. Manage actual settings through the GitHub publishing environment, and redact issues, pull requests, logs and screenshots. The `example.com` domain below is illustrative, not a working download source.
+Release PRs, tags and Releases created with the default token do not automatically trigger other Actions. CI, builds and uploads therefore use the same workflow's `release_created`, `tag_name` and `sha` outputs rather than tag/release events. A human merging the release PR still triggers the publishing workflow via a `main` push.
 
-| Type | Name | Purpose |
-| --- | --- | --- |
-| Secret | `S3_BUCKET` | Full COS bucket name, including its APPID suffix |
-| Secret | `S3_KEY_PREFIX` | Optional object key prefix mapped to the public root |
-| Secret | `S3_REGION` | COS region identifier matching the bucket's region |
-| Secret | `S3_ACCESS_KEY_ID` | CI uploads only |
-| Secret | `S3_SECRET_ACCESS_KEY` | CI uploads only |
+The release PR itself does not automatically run CI. If branch protection requires PR checks, maintainers must arrange check triggering or use a dedicated token / GitHub App that triggers checks. This workflow does not introduce those credentials or bypass branch protection.
 
-The Action uses the native COS SDK; `S3_ENDPOINT` and AWS CLI are no longer needed. Configure public read-only downloads so `miocli/...` objects resolve beneath the installers' public download root (example: `https://downloads.example.com/public/` uses prefix `public`). CI requires `cos:PutObject` for that prefix. With `clean: false`, historical files are not deleted and ListBucket or delete permissions are unnecessary. Protect the publishing environment and limit permitted tags.
+### Recovery and acceptance
 
-```text
-miocli/install.sh                    # stable script entry
-miocli/install.ps1
-miocli/stable.txt                    # one-line stable version, updated last
-miocli/releases/vX.Y.Z/              # installers, six packages and SHA-256 files
-```
+If CI, builds or uploads fail, use “Re-run failed jobs” on the same workflow run, preserving the successful release-please job's outputs. Uploads use `gh release upload --clobber` to retry partially uploaded assets at the same version. Do not rerun every job: an existing Release will not produce `release_created=true` again. Failures after Release creation leave some or all assets absent; publication is not successful until the failures are resolved.
 
-Verify build-artifact SHA-256 values, upload versioned packages and installer aliases, then upload `stable.txt` separately only after success. Upload jobs are serialized but not transactional: there are no conditional writes, conflict checks, automatic public verification or downgrade prevention. Failures may leave partial files; rerunning an older tag can overwrite stable. Do not rerun older tags to update stable entry points. The Action does not set Cache-Control; configure COS/CDN to avoid long-lived installer and stable-index caches.
+Use isolated install directories for acceptance. Download installers from GitHub Release, verify all six packages, six SHA-256 files and two scripts, then check the installed version and commit. GitHub version lookup is limited to 15 seconds and archive/checksum requests to 30 seconds each. Shell also bounds connection setup; PowerShell 7.4+ sets connection and operation timeouts separately, while Windows PowerShell uses `TimeoutSec`. Request, version and integrity failures stop installation and preserve the existing CLI.
+
+Local workflow and installer tests do not create real release PRs, tags or Releases. End-to-end acceptance still requires a successful GitHub release run; passing local tests does not validate repository permissions, branch protection or remote publication.
+
+### Maintaining the Mihomo version
 
 To upgrade Mihomo, update `internal/core/mihomo-release.json` after verifying an official stable version, all six filenames, archive SHA-256 values and the license. Prefer portable amd64 baseline variants. Update pinned-version notes in both READMEs and run mapping/download tests plus isolated-instance compatibility tests. Never update only the version string or query latest from clients.
 
 Mihomo is a separate GPL-3.0 program and is not mirrored or uploaded by this workflow. Clients download and verify its pinned version only from official GitHub Releases; when GitHub is unreachable, select an existing local core in setup.
-
-GitHub version lookup is limited to 15 seconds and package/checksum requests to 30 seconds each; S3 metadata/checksums use 60 seconds and archives 180 seconds. POSIX/Go also bound connection setup. PowerShell 7.4+ configures connection and operation timeouts separately; older PowerShell retains its `TimeoutSec` total request limit without requiring a PowerShell upgrade.
-
-Acceptance uses isolated user directories: obtain the script from S3, install miocli and verify the version/digest. Download Mihomo from GitHub or reuse an existing local core. Real acceptance needs configured CI storage credentials and a successful stable-tag Release workflow; passing tests does not mean S3 has been deployed.
 
 ## Uninstall and cleanup
 

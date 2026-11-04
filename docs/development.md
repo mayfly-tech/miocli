@@ -91,44 +91,40 @@ MIOCLI_TEST_ARCHIVE=/absolute/path/to/pinned-mihomo.gz \
 go test -race -count=1 -run '^TestIsolatedPinnedBootstrap$' ./internal/core
 ```
 
-## S3 镜像发布
+## 发布流程
+
+`release.yml` 在 `main` 收到提交时运行 `googleapis/release-please-action`。`release-please-config.json` 使用 Go 单包策略，`.release-please-manifest.json` 记录已发布版本，以 `v0.1.1` 为初始基线；`bootstrap-sha` 限制首次变更日志从该版本之后开始收集。版本通过构建时的 Go ldflags 注入，本地开发显示 `dev`。
+
+1. 使用 Conventional Commits 提交变更：`fix` 对应补丁版本，`feat` 对应次版本，`!` 或 `BREAKING CHANGE` 对应主版本。仅 `ci`、`chore` 或文档变更默认不会单独触发发布 PR。
+2. release-please 自动创建或更新发布 PR，修改版本 manifest 和 `CHANGELOG.md`。检查变更日志与版本后合并，不需要手工打标签。
+3. 合并发布 PR 后，release-please 创建 `vX.Y.Z` 标签和正式 GitHub Release，并生成发布说明。
+4. 同一工作流使用 release-please 返回的发布 SHA 运行完整 CI，再构建 Linux、macOS、Windows 的 amd64/arm64 包和两份安装脚本。校验 SHA-256 后，将全部 14 份资产上传到对应 Release。
+
+正式 Release 先于资产创建，需等待 Release 工作流全部成功才能安装；期间 latest 安装可能因缺少资产而失败，但不会替换已有 CLI。发布工作流串行执行，不取消进行中的发布。版本包命名保持 `miocli_X.Y.Z_OS_ARCH.tar.gz`（Windows 为 `.zip`），每份包附带同名 `.sha256` 文件。
 
 发布包按目标平台导出第三方许可证，不跳过 Windows 专用依赖。`go-localereader` 固定在 `v0.0.2-0.20220822084737-6bae6c923850`：该提交相对 `v0.0.1` 仅补充上游 LICENSE，无代码变更，避免 Windows 打包时因缺少许可证失败。
 
-`release.yml` 在标签构建成功并创建 GitHub 草稿 Release 后，直接通过 `TencentCloud/cos-action` 上传已有构建产物，不重新构建。仅稳定标签上传 COS；S3 在 GitHub Release 正式发布前即可上线。上传失败可重跑 Release 工作流的失败 job，不再使用独立发布工作流或 Python 发布脚本。
+### 权限与检查
 
-环境配置统一使用 GitHub Actions Secrets，在 `Settings → Environments → s3-release → Environment secrets` 中设置以下项目；工作流不读取同名 Variables。仅 `S3_KEY_PREFIX` 可不设置，其余项目必填。不要将凭据写入源码或客户端。
+工作流使用默认 `GITHUB_TOKEN`，无需额外发布凭据。release-please job 具有 `contents`、`issues`、`pull-requests` 写权限，上传 job 仅具有 `contents` 写权限，其余 job 只读。仓库 `Settings → Actions → General` 需允许 GitHub Actions 创建 PR。
 
-公开文档只记录配置项名称和通用发布约定，不记录实际存储 API 地址、桶名、账号标识、区域部署、凭据值或内部网络信息。实际配置通过 GitHub 发布环境管理；Issue、PR、日志和截图也需脱敏。下文使用 `example.com` 示例域名，不代表可用下载源。
+默认 Token 创建的发布 PR、标签和 Release 不会自动触发其他 Actions。发布 CI、构建和上传因此直接使用同一工作流内的 `release_created`、`tag_name`、`sha` 输出串联，不依赖标签或 Release 事件。人工合并发布 PR 仍会触发 `main` push 的发布工作流。
 
-| 类型 | 名称 | 用途 |
-| --- | --- | --- |
-| Secret | `S3_BUCKET` | COS 完整存储桶名，包含 APPID 后缀 |
-| Secret | `S3_KEY_PREFIX` | 可选对象键前缀，与公开根路径对应 |
-| Secret | `S3_REGION` | COS 区域标识，与存储桶所属区域一致 |
-| Secret | `S3_ACCESS_KEY_ID` | 仅 CI 上传使用 |
-| Secret | `S3_SECRET_ACCESS_KEY` | 仅 CI 上传使用 |
+发布 PR 本身不会自动运行 CI；若分支保护要求 PR 检查成功，维护者需安排检查触发方式或改用能触发检查的专用 Token / GitHub App。当前工作流不引入这些凭据，也不绕过分支保护。
 
-Action 使用 COS 原生 SDK，不再需要 `S3_ENDPOINT` 或 AWS CLI。将桶/前缀配置为公开只读下载，使对象 `miocli/...` 映射到安装器的公开下载根地址（示例：`https://downloads.example.com/public/` 对应前缀 `public`）。CI 上传身份需要该前缀的 `cos:PutObject` 权限；`clean: false` 不删除历史文件，不需要 ListBucket 或删除权限。保护发布环境并限制可发布的标签。
+### 失败恢复与验收
 
-布局：
+CI、构建或上传失败时，在同一次工作流运行中选择“重新运行失败的作业”，保留成功的 release-please job 输出。上传使用 `gh release upload --clobber`，可重试同版本的部分上传。不选择完整重跑：已创建的 Release 不会再次得到 `release_created=true`。正式 Release 创建后失败会暂缺部分或全部资产，修复失败前不能视为发布成功。
 
-```text
-miocli/install.sh                    # 稳定脚本入口
-miocli/install.ps1
-miocli/stable.txt                    # 单行稳定版本，最后更新
-miocli/releases/vX.Y.Z/              # 两份脚本、六个平台包及 SHA-256
-```
+验收使用隔离安装目录，从 GitHub Release 下载脚本，确认六份包、六份 SHA-256 和两份脚本齐全，安装后检查版本与提交信息。GitHub 版本查询限制 15 秒，包和校验文件各限制 30 秒；Shell 另有连接限制，PowerShell 7.4+ 分别设置连接和操作超时，Windows PowerShell 使用 `TimeoutSec`。请求、版本或校验失败均终止安装且保留已有 CLI。
 
-先校验构建产物 SHA-256，再上传版本包与安装脚本，成功后最后单独上传 `stable.txt`。工作流串行执行，但上传不是事务，不提供条件写入、冲突检查、自动公网校验或版本防降级；失败可能留下部分文件，重跑旧标签可能覆盖 stable。不要重跑旧标签来更新稳定入口。Action 不设置 Cache-Control，需在 COS/CDN 中避免长期缓存安装脚本和稳定索引。
+本地工作流和安装器测试不创建真实发布 PR、标签或 Release。端到端验收仍需在 GitHub 上成功运行发布流程；本地测试通过不代表仓库权限、分支保护或远端发布已验证。
+
+### Mihomo 版本维护
 
 升级 Mihomo 时修改 `internal/core/mihomo-release.json`：确认官方稳定版本、全部六个平台文件名、原始压缩包 SHA-256 和许可证；优先可移植 amd64 baseline。更新中英文 README 的固定版本说明，执行映射/下载测试和隔离实例兼容测试。不要仅修改版本字符串或在客户端查询 latest。
 
 Mihomo 是独立的 GPL-3.0 程序，不由本工作流镜像或上传。客户端仅从官方 GitHub Release 下载并校验固定版本；GitHub 不可达时需在 setup 中指定已有本地内核。
-
-GitHub 版本查询限制 15 秒，包和校验文件各限制 30 秒；S3 元数据/校验文件限制 60 秒、包限制 180 秒。POSIX/Go 另有连接限制，PowerShell 7.4+ 分别设置连接和操作超时；旧版 PowerShell 使用现有 `TimeoutSec` 总请求限制，不要求安装新版 PowerShell。
-
-验收须使用隔离用户目录：从 S3 获得脚本并安装 miocli，检查版本和 SHA-256。Mihomo 需从 GitHub 下载或复用已有本地内核。首次真实验收需要配置 CI 存储凭据并成功运行稳定标签的 Release 工作流；测试通过不等于 S3 已部署。
 
 ## 卸载与清理
 
