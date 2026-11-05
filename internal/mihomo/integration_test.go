@@ -77,14 +77,6 @@ func TestMihomoIntegration(t *testing.T) {
 	if err := client.UpdateProvider(ctx, "MIOCLI-Provider"); err != nil {
 		t.Fatalf("UpdateProvider() failed: %v", err)
 	}
-	if path := os.Getenv("MIOCLI_INTEGRATION_CONFIG"); path != "" {
-		if err := client.Reload(ctx, path); err != nil {
-			t.Fatalf("Reload() failed: %v", err)
-		}
-		if mode, err := client.Mode(ctx); err != nil || mode != ModeRule {
-			t.Fatalf("reloaded mode = %q, %v", mode, err)
-		}
-	}
 }
 
 func containsName(names []string, name string) bool {

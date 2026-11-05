@@ -2,15 +2,14 @@
 
 [简体中文](README.md) · English
 
-`miocli` is a keyboard-first terminal control panel for one [Mihomo](https://github.com/MetaCubeX/mihomo) instance. Browse proxy groups and nodes, switch nodes and proxy modes, test latency, and inspect or update providers.
+`miocli` is a keyboard-first terminal operations console for one already running [Mihomo](https://github.com/MetaCubeX/mihomo) instance. For advanced users with an existing core, browse proxy resources, switch nodes and modes, test latency, and inspect or update providers locally or over SSH. miocli never installs, starts, stops or upgrades the core.
 
 ## Features
 
-- Full-screen English interface with Subscriptions, Groups, Nodes and Status views.
+- Full-screen English interface with Groups, Nodes, Providers and Status views; Groups opens by default.
 - Browse nested groups and search names; switch members in `Selector` groups and verify changes by rereading the API.
 - Filter nodes by protocol or source, sort by API order, name or latency, and test one node, filtered results or direct members of the current group.
 - Switch among Rule, Global and Direct modes; inspect and manually update Mihomo proxy providers.
-- Manage local YAML/HTTPS profiles for a managed core started by this invocation, with confirmed validation and hot reload.
 - Connect to one Mihomo controller over loopback HTTP or certificate-validated HTTPS.
 
 ## Getting started
@@ -55,7 +54,7 @@ miocli doctor
 miocli
 ```
 
-Choose an existing core in setup and enter its `external-controller` URL and `secret`. This is the control API, not the HTTP/SOCKS proxy port. Alternatively, specify a Mihomo YAML file to read these settings only. miocli does not scan application directories, guess secrets, or modify source configuration.
+Enter the existing core's `external-controller` URL and `secret` in setup. This is the control API, not the HTTP/SOCKS proxy port. Alternatively, specify a Mihomo YAML file to read these settings only. miocli does not scan application directories, guess secrets, or modify source configuration.
 
 Without saved settings, startup first tries `http://127.0.0.1:9090`. If it cannot connect, only an interactive terminal offers setup; it never installs or starts a core implicitly. `doctor` performs read-only configuration and API checks.
 
@@ -69,19 +68,15 @@ go run ./cmd/miocli dev
 
 Set the existing controller address and secret in the local file. `dev` connects only; it does not write user settings, download a core or start one. On Windows, use `Copy-Item` to copy the template and omit `chmod`. See the [development guide](docs/development_EN.md).
 
-### Managed core
+### Product boundary
 
-Choose managed mode in setup and confirm configuration import and any required download. miocli operates on a copy of the selected configuration and stops only a child process started by that invocation. Connection failures never switch to managed mode automatically. See the [product overview](docs/product_EN.md).
-
-Managed mode never edits the source configuration. Disable TUN and custom listeners before import, and make relative-path resources available. A missing core is downloaded only after separate confirmation. Mihomo is currently pinned to `v1.19.33`: downloads use only official GitHub and are verified against an embedded SHA-256. Select an existing local core when GitHub is unreachable. Settings are saved only after validation.
-
-This is online bootstrap, not full offline support: subscriptions, providers, rules and Geo data may still require network access. An existing local Mihomo executable can still be selected in setup.
+Like k9s, miocli focuses on interacting with resources: connect to an existing instance, browse, act and verify. It does not own the core lifecycle. Node selection, mode changes and provider updates are supported; full configuration subscriptions, hot reload, system proxy and TUN management are outside the product boundary. See the [product overview](docs/product_EN.md).
 
 ### Uninstall
 
-Exit all miocli sessions (`q` or `Ctrl+C`) first so they stop their managed children. Disconnecting from an existing core does not stop that external instance. After an abnormal exit, check any remaining process's PID and executable path and stop only miocli-owned processes; never terminate all Mihomo processes by name.
+Exit all miocli sessions (`q` or `Ctrl+C`) first. Exiting closes only the console, never the external Mihomo instance.
 
-**Remove only the CLI, preserving settings and profiles:**
+**Remove only the CLI, preserving connection settings:**
 
 ```sh
 # Linux / macOS: default install location
@@ -98,14 +93,14 @@ if (Test-Path -LiteralPath $binary -PathType Leaf) {
 
 If installation used `--install-dir` / `-InstallDir` or `MIOCLI_INSTALL_DIR`, remove `miocli` / `miocli.exe` from that actual location, not the entire shared installation directory. Installers never modify PATH. If you added a dedicated directory yourself, optionally remove its PATH entry without removing directories still used by other tools.
 
-**Optional: remove all miocli data.** Back up settings and profiles you want to keep, then inspect and manually remove these dedicated directories. This removes connection secrets, subscription profiles, managed configuration copies, logs and downloaded cores:
+**Optional: remove connection settings.** Back up settings you want to keep, then inspect and manually remove these dedicated configuration directories. This removes saved connection secrets:
 
-| Platform | Settings and profiles | Cores downloaded by miocli |
-| --- | --- | --- |
-| Linux / macOS | `$XDG_CONFIG_HOME/miocli`, or `~/.config/miocli` when unset | `$XDG_DATA_HOME/miocli`, or `~/.local/share/miocli` when unset |
-| Windows | `%AppData%\miocli` | `%LocalAppData%\miocli` |
+| Platform | Connection settings |
+| --- | --- |
+| Linux / macOS | `$XDG_CONFIG_HOME/miocli`, or `~/.config/miocli` when unset |
+| Windows | `%AppData%\miocli` |
 
-With `--config`, the application configuration and managed `mihomo` directory are at the custom configuration location. Remove only files and directories confirmed to belong to miocli, never their shared parent. Do not remove external Mihomo binaries reused from PATH or explicit paths, other clients such as Clash Verge, their settings, or the original imported YAML. No system proxy, TUN or service cleanup is required: miocli does not install or modify them.
+With `--config`, remove only the confirmed miocli configuration file, never its shared parent. Inspect and back up before cleaning, and preserve data still in use. Do not remove external Mihomo binaries, other clients such as Clash Verge, their settings, or the original imported YAML. No system proxy, TUN or service cleanup is required: miocli does not install or modify them.
 
 ## Configuration
 
@@ -117,8 +112,6 @@ Configuration file locations:
 ```yaml
 server: http://127.0.0.1:9090
 secret: ""
-core:
-  mode: connect
 ```
 
 Server precedence: `--server` > nonempty `MIOCLI_SERVER` > YAML > default URL. Secret precedence: nonempty `MIOCLI_SECRET` > YAML > no authentication. `--config` selects one configuration file; files are not merged. `--server` applies only to the current connection. Never pass secrets as command-line arguments.
@@ -127,7 +120,7 @@ Server precedence: `--server` > nonempty `MIOCLI_SERVER` > YAML > default URL. S
 
 | Key | Action |
 | --- | --- |
-| `1` / `2` / `3` / `4` | Subscriptions / Groups / Nodes / Status |
+| `1` / `2` / `3` / `4` | Groups / Nodes / Providers / Status |
 | `:` | Command bar, e.g. `groups`, `nodes`, `providers`, `mode rule` |
 | `Tab` / `Shift+Tab` | Toggle list, details or groups/members |
 | `↑` / `↓`, `j` / `k` | Move selection |
@@ -136,11 +129,12 @@ Server precedence: `--server` > nonempty `MIOCLI_SERVER` > YAML > default URL. S
 | `Space` / `T` | Test nodes or direct members of the current group |
 | `s` / `t` / `f` | Sort nodes / filter protocol / filter source |
 | `m` | Cycle Rule, Global and Direct |
+| `u` | Update the selected provider and read back status in Providers |
 | `r` / `?` | Refresh or reconnect / show help |
-| `Esc` | Clear search, close a dialog or go back |
+| `Esc` | Clear search, close details or go back |
 | `q` / `Ctrl+C` | Quit |
 
-In Subscriptions, `p` toggles profiles and providers. Profile actions use `a` / `e` / `u` / `d`; `Space` activates. See the [Chinese README](README.md) for setup and profile details.
+Providers are API resources of the existing core, not full YAML configuration profiles. See the [Chinese README](README.md) for setup details.
 
 ## Documentation
 
@@ -153,9 +147,9 @@ In Subscriptions, `p` toggles profiles and providers. Profile actions use `a` / 
 
 ## Privacy and security
 
-miocli has no accounts, telemetry or background update checks. Credentials are sent only to the configured controller. Managed-core downloads require separate confirmation in setup. Configuration and diagnostic logs may contain sensitive information; inspect and redact them before sharing. Report vulnerabilities privately through GitHub Security Advisories.
+miocli has no accounts, telemetry or background update checks. Credentials are sent only to the configured controller. Configuration and diagnostic information may contain sensitive information; inspect and redact them before sharing. Report vulnerabilities privately through GitHub Security Advisories.
 
-Downloads use certificate-validated HTTPS. miocli archives and checksums share a source: SHA-256 detects transfer corruption but does not independently authenticate a compromised distribution source; this version does not add package signing. Expected Mihomo digests are embedded in miocli.
+CLI installation downloads use certificate-validated HTTPS. miocli archives and checksums share a source: SHA-256 detects transfer corruption but does not independently authenticate a compromised distribution source; packages do not include independent signatures.
 
 ## License
 

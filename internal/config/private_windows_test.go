@@ -11,7 +11,7 @@ import (
 
 func TestSavedConfigHasPrivateWindowsACL(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.yaml")
-	cfg := Config{Server: DefaultServer, Secret: "test-secret", Core: Core{Mode: Connect}}
+	cfg := Config{Server: DefaultServer, Secret: "test-secret"}
 	for range 2 {
 		if err := Save(path, cfg); err != nil {
 			t.Fatal(err)

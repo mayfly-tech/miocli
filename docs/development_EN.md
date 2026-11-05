@@ -6,7 +6,7 @@
 
 - Go 1.24 or newer.
 - Unit tests do not require a running Mihomo instance; API tests use `httptest.Server` and fake clients.
-- Integration tests change the instance's node, mode or configuration. Run them only against a disposable test instance.
+- Integration tests change the instance's node, mode or provider. Run them only against a disposable test instance.
 
 ## Local configuration
 
@@ -46,7 +46,7 @@ Install the local commit message check from the repository root:
 sh scripts/install-hooks.sh
 ```
 
-Commit messages must follow Conventional Commits: `type(scope)!: subject`, with an optional scope and breaking-change marker `!`. Supported types are `feat`, `fix`, `docs`, `style`, `refactor`, `perf`, `test`, `build`, `ci`, `chore` and `revert`. For example: `feat(cli): add profile command`. Git-generated merge, revert, fixup and squash messages are not checked. The hook checks only commit messages; it does not run formatting or tests. Installation applies only to the current clone.
+Commit messages must follow Conventional Commits: `type(scope)!: subject`, with an optional scope and breaking-change marker `!`. Supported types are `feat`, `fix`, `docs`, `style`, `refactor`, `perf`, `test`, `build`, `ci`, `chore` and `revert`. For example: `feat(cli): improve controller diagnostics`. Git-generated merge, revert, fixup and squash messages are not checked. The hook checks only commit messages; it does not run formatting or tests. Installation applies only to the current clone.
 
 Test the Windows installer with:
 
@@ -74,21 +74,7 @@ MIOCLI_INTEGRATION_SECRET=miocli-ci-secret \
 go test -count=1 -run '^TestMihomoIntegration$' ./internal/mihomo
 ```
 
-`TestIsolated` starts and cleans up its own child process. Obtain and verify a Mihomo binary, then provide its absolute path:
-
-```sh
-MIOCLI_TEST_BINARY=/absolute/path/to/mihomo \
-go test -count=1 -run '^TestIsolated' ./internal/mihomo ./internal/profile
-```
-
-These tests do not read user settings or connect to a regular instance. Profile indexes, transaction logs and configurations may contain sensitive information; use non-sensitive data in samples, screenshots and logs.
-
-`TestIsolatedPinnedBootstrap` uses the pinned archive for the native platform and a local HTTPS test server to install into an empty core directory, verify the binary, start a real child and clean it up:
-
-```sh
-MIOCLI_TEST_ARCHIVE=/absolute/path/to/pinned-mihomo.gz \
-go test -race -count=1 -run '^TestIsolatedPinnedBootstrap$' ./internal/core
-```
+CI independently runs current and previous stable controllers in test-only containers using non-sensitive repository fixtures. Production code does not manage cores. Redact settings, diagnostics and screenshots before sharing.
 
 ## Release workflow
 
@@ -101,7 +87,7 @@ go test -race -count=1 -run '^TestIsolatedPinnedBootstrap$' ./internal/core
 
 The published Release exists before its assets. Wait for the entire Release workflow to succeed before installing; latest installation may fail while assets are absent but preserves an existing CLI. Release runs are serialized without cancelling an ongoing release. Archives retain `miocli_X.Y.Z_OS_ARCH.tar.gz` names (`.zip` on Windows), each accompanied by a matching `.sha256` file.
 
-Release archives export third-party licenses for each target platform without skipping Windows-only dependencies. `go-localereader` is pinned to `v0.0.2-0.20220822084737-6bae6c923850`: compared with `v0.0.1`, this commit only adds the upstream LICENSE with no code changes, preventing Windows packaging failures due to a missing license.
+Release archives export third-party licenses for each target platform without skipping Windows-only dependencies. `go-localereader` is pinned to `v0.0.2-0.20220822084737-6bae6c923850`, which includes the upstream LICENSE so Windows packaging can export it.
 
 ### Permissions and checks
 
@@ -119,11 +105,9 @@ Use isolated install directories for acceptance. Download installers from GitHub
 
 Local workflow and installer tests do not create real release PRs, tags or Releases. End-to-end acceptance still requires a successful GitHub release run; passing local tests does not validate repository permissions, branch protection or remote publication.
 
-### Maintaining the Mihomo version
+### Mihomo compatibility
 
-To upgrade Mihomo, update `internal/core/mihomo-release.json` after verifying an official stable version, all six filenames, archive SHA-256 values and the license. Prefer portable amd64 baseline variants. Update pinned-version notes in both READMEs and run mapping/download tests plus isolated-instance compatibility tests. Never update only the version string or query latest from clients.
-
-Mihomo is a separate GPL-3.0 program and is not mirrored or uploaded by this workflow. Clients download and verify its pinned version only from official GitHub Releases; when GitHub is unreachable, select an existing local core in setup.
+miocli does not pin, download or upgrade user cores. Compatibility is verified through controller API unit tests and CI integration tests against current and previous stable releases. API extensions require DTO, error classification, fake client, fixture and documentation updates, not core distribution or process management in the product.
 
 ## Uninstall and cleanup
 
@@ -133,7 +117,7 @@ See [README: Uninstall](../README_EN.md#uninstall) for installed CLI removal, op
 
 - API DTOs and domain types belong in `internal/mihomo`; the UI does not construct HTTP requests.
 - Bubble Tea `tea.Cmd` starts network work; typed messages update the Model.
-- Profile storage and reload belong in `internal/profile`. Only a managed child actually started by this invocation permits full-profile writes.
+- Connection settings and read-only extraction from specified Mihomo YAML files belong in `internal/config`. The UI never writes source configuration or manages core processes.
 - Changes to configuration precedence, security policy or API mappings require corresponding test, README and [architecture](architecture_EN.md) updates.
 
 See the [contributing guide](../CONTRIBUTING_EN.md) for pull request guidance.

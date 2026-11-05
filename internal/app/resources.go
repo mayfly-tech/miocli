@@ -16,17 +16,13 @@ type resourcePage uint8
 
 const (
 	pageGroups resourcePage = iota
-	pageProfiles
-	pageProviders
 	pageNodes
+	pageProviders
 	pageStatus
 )
 
 type Runtime struct {
 	ConfigPath string
-	CoreMode   string
-	Owned      bool
-	Dev        bool
 }
 
 type Option func(*Model)
@@ -67,7 +63,7 @@ func (m *Model) loadProviders() tea.Cmd {
 }
 
 func (m *Model) updateProvider() tea.Cmd {
-	if m.operation != "" || m.profilePending {
+	if m.operation != "" {
 		m.notice = "Wait for the current operation to finish"
 		return nil
 	}
@@ -82,8 +78,11 @@ func (m *Model) updateProvider() tea.Cmd {
 		return nil
 	}
 	name := rows[m.resourceIndex(rows)].id
+	m.cancelLatency()
+	m.generation++
 	m.operation = "Updating provider"
 	m.lastError = ""
+	m.notice = ""
 	ctx, generation := m.ctx, m.generation
 	return func() tea.Msg {
 		writeErr := client.UpdateProvider(ctx, name)
@@ -110,9 +109,6 @@ func (m *Model) changePage(page resourcePage) tea.Cmd {
 }
 
 func (m *Model) resourceKey(msg tea.KeyMsg) (bool, tea.Cmd) {
-	if m.dialog != nil {
-		return true, m.dialogKey(msg)
-	}
 	if m.help {
 		if msg.String() == "?" || msg.Type == tea.KeyEsc {
 			m.help = false
@@ -154,10 +150,6 @@ func (m *Model) resourceKey(msg tea.KeyMsg) (bool, tea.Cmd) {
 		}
 		return true, nil
 	}
-	if m.profilePending && (msg.String() == "m" || msg.String() == " " || msg.String() == "enter" && m.page == pageGroups && m.focusRight) {
-		m.lastError = "Profile recovery pending; restart the owned core. Conflicting writes are blocked"
-		return true, nil
-	}
 	key := msg.String()
 	switch key {
 	case "c":
@@ -174,24 +166,17 @@ func (m *Model) resourceKey(msg tea.KeyMsg) (bool, tea.Cmd) {
 		m.command.Focus()
 		return true, nil
 	case "1":
-		return true, m.changePage(pageProfiles)
-	case "2":
 		return true, m.changePage(pageGroups)
-	case "3":
+	case "2":
 		return true, m.changePage(pageNodes)
+	case "3":
+		return true, m.changePage(pageProviders)
 	case "4":
 		return true, m.changePage(pageStatus)
-	case "p":
-		if m.page == pageProfiles {
-			return true, m.changePage(pageProviders)
-		}
-		if m.page == pageProviders {
-			return true, m.changePage(pageProfiles)
-		}
 	case "r":
 		if m.state == stateReady && !m.polling && m.operation == "" {
 			m.pollRetries = 0
-			return true, tea.Batch(m.startRefresh(), m.loadProviders(), m.loadProfiles())
+			return true, tea.Batch(m.startRefresh(), m.loadProviders())
 		}
 	case "s":
 		if m.page == pageNodes {
@@ -329,8 +314,6 @@ func (m *Model) resourceKey(msg tea.KeyMsg) (bool, tea.Cmd) {
 	case "esc", "left", "h":
 		if m.detail {
 			m.detail = false
-		} else if m.page == pageProviders {
-			return true, m.changePage(pageProfiles)
 		} else {
 			m.search.SetValue("")
 			m.filterType, m.filterSource = "", ""
@@ -339,12 +322,8 @@ func (m *Model) resourceKey(msg tea.KeyMsg) (bool, tea.Cmd) {
 		if m.page == pageProviders {
 			return true, m.updateProvider()
 		}
-		return m.profileKey(key)
-	case "a", "e", "d", " ":
-		if m.page == pageProfiles {
-			return m.profileKey(key)
-		}
-		if key == " " && m.page == pageNodes {
+	case " ":
+		if m.page == pageNodes {
 			return true, m.testNodes(false)
 		}
 	case "T":
@@ -370,8 +349,6 @@ func (m *Model) executeCommand(value string) tea.Cmd {
 		switch parts[0] {
 		case "groups":
 			return m.changePage(pageGroups)
-		case "profiles":
-			return m.changePage(pageProfiles)
 		case "providers":
 			return m.changePage(pageProviders)
 		case "nodes":
@@ -392,7 +369,7 @@ func (m *Model) executeCommand(value string) tea.Cmd {
 	if len(parts) == 2 && parts[0] == "mode" {
 		mode := mihomo.Mode(parts[1])
 		if mode == mihomo.ModeRule || mode == mihomo.ModeGlobal || mode == mihomo.ModeDirect {
-			if m.operation != "" || m.profilePending {
+			if m.operation != "" {
 				m.lastError = "Wait for the current operation to finish"
 				return nil
 			}
@@ -431,8 +408,6 @@ func (m *Model) selectMember() tea.Cmd {
 func (m *Model) resourceRows() []resourceRow {
 	var rows []resourceRow
 	switch m.page {
-	case pageProfiles:
-		rows = m.profileRows()
 	case pageProviders:
 		for name, p := range m.providers {
 			info := []string{"Name: " + name, "Type: " + p.Type, "Source: " + p.VehicleType, "Updated: " + unknown(p.UpdatedAt)}
@@ -677,8 +652,8 @@ func (m *Model) scrollDetails(key string) {
 	width, _ := m.screenSize()
 	lines := m.helpLines()
 	height := m.contentHeight()
-	if m.page == pageProfiles || m.page == pageProviders {
-		height -= len(m.subscriptionHeader(width, theme.New(m.noColor)))
+	if m.page == pageProviders {
+		height -= len(m.providerHeader(width, theme.New(m.noColor)))
 	}
 	if m.page == pageStatus && !m.help {
 		lines = m.statusLines()

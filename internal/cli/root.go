@@ -13,9 +13,7 @@ import (
 
 	"miocli/internal/app"
 	"miocli/internal/config"
-	"miocli/internal/core"
 	"miocli/internal/mihomo"
-	"miocli/internal/profile"
 	"miocli/internal/theme"
 )
 
@@ -30,7 +28,6 @@ type dependencies struct {
 	ask      func(*cobra.Command, string, string, bool) (string, error)
 	choose   func(*cobra.Command, string, string, []choice) (string, error)
 	probe    func(context.Context, config.Config) error
-	start    func(context.Context, config.Config, core.Paths) (*core.Manager, error)
 	ui       func(context.Context, config.Config, bool, app.Runtime) error
 }
 
@@ -44,23 +41,12 @@ func defaultDependencies() dependencies {
 		ask:      askTerminal,
 		choose:   chooseTerminal,
 		probe:    probeConnection,
-		start:    core.EnsureRunning,
 		ui: func(ctx context.Context, cfg config.Config, noColor bool, runtime app.Runtime) error {
 			client, err := mihomo.NewHTTPClient(cfg.Server, cfg.Secret)
 			if err != nil {
 				return err
 			}
-			options := []app.Option{app.WithRuntime(runtime)}
-			if cfg.Core.Mode == config.Managed {
-				service := profile.New(runtime.ConfigPath, cfg, runtime.Owned, client)
-				if runtime.Owned {
-					if err := service.RecoverOwnedStartup(ctx); err != nil {
-						return fmt.Errorf("recover profile transaction: %w", err)
-					}
-				}
-				options = append(options, app.WithProfiles(service))
-			}
-			model := app.New(ctx, client, cfg.Server, noColor, options...)
+			model := app.New(ctx, client, cfg.Server, noColor, app.WithRuntime(runtime))
 			_, err = tea.NewProgram(model, tea.WithContext(ctx), tea.WithAltScreen()).Run()
 			if err != nil {
 				return fmt.Errorf("run terminal interface: %w", err)
@@ -107,37 +93,17 @@ func newCommand(deps dependencies) *cobra.Command {
 		}
 		return resolved, err
 	}
-	run := func(cmd *cobra.Command, dev bool) (runErr error) {
+	run := func(cmd *cobra.Command, dev bool) error {
 		cfg, err := load(cmd, dev)
 		if err != nil {
 			return err
-		}
-		if dev && cfg.Core.Mode == config.Managed {
-			return errors.New("dev only connects to an existing core; set core.mode: connect in the local configuration")
-		}
-		if cfg.ExplicitServer {
-			cfg.Core.Mode = config.Connect
-		}
-		var manager *core.Manager
-		if !dev && cfg.Core.Mode == config.Managed {
-			paths, err := core.PathsFor(cfg.Path)
-			if err != nil {
-				return err
-			}
-			manager, err = deps.start(cmd.Context(), cfg.Config, paths)
-			if err != nil {
-				return err
-			}
-		}
-		if manager != nil {
-			defer func() { runErr = errors.Join(runErr, manager.Close()) }()
 		}
 		if err := deps.probe(cmd.Context(), cfg.Config); err != nil {
 			if !dev && !cfg.Exists && !cfg.ExplicitServer && deps.terminal(cmd) {
 				fmt.Fprintf(cmd.ErrOrStderr(), "Controller unavailable: %v\n", err)
 				return runSetup(cmd, cfg, deps)
 			}
-			return fmt.Errorf("connect to %s: %w\n%s", cfg.Server, err, core.ConnectionHint(err))
+			return fmt.Errorf("connect to %s: %w\n%s", cfg.Server, err, config.ConnectionHint(err))
 		}
 		if !deps.terminal(cmd) {
 			return errors.New("the control panel requires an interactive terminal; use miocli doctor for read-only diagnostics")
@@ -146,12 +112,12 @@ func newCommand(deps dependencies) *cobra.Command {
 		if err != nil {
 			return fmt.Errorf("resolve UI configuration path: %w", err)
 		}
-		return deps.ui(cmd.Context(), cfg.Config, theme.NoColor(noColor), app.Runtime{ConfigPath: path, CoreMode: cfg.Core.Mode, Owned: manager != nil, Dev: dev})
+		return deps.ui(cmd.Context(), cfg.Config, theme.NoColor(noColor), app.Runtime{ConfigPath: path})
 	}
 	root := &cobra.Command{
-		Use: "miocli", Short: "Terminal control panel for Mihomo",
-		Long:    "A keyboard-first control panel for one Mihomo instance.\nBrowse groups, select nodes, test latency, and manage subscriptions.\nConnect to an existing controller, or use setup to explicitly manage a core.",
-		Example: "  miocli setup                         # Configure a connection\n  miocli doctor                        # Run read-only checks\n  miocli dev                           # Use repository-local settings\n  miocli --server https://host:9090     # Connect without managing a core",
+		Use: "miocli", Short: "Terminal operations console for an existing Mihomo instance",
+		Long:    "A keyboard-first terminal operations console for one existing Mihomo instance.\nBrowse groups, select nodes, test latency, and update proxy providers.\nConnect to an already running controller; miocli never installs, starts or stops cores.",
+		Example: "  miocli setup                         # Configure a connection\n  miocli doctor                        # Run read-only checks\n  miocli dev                           # Use repository-local settings\n  miocli --server https://host:9090     # Connect to an existing controller",
 		Args:    cobra.NoArgs, SilenceUsage: true, SilenceErrors: true,
 		RunE: func(cmd *cobra.Command, _ []string) error { return run(cmd, false) },
 	}
@@ -166,7 +132,7 @@ func newCommand(deps dependencies) *cobra.Command {
 		Example: "  miocli dev\n  miocli dev --config ./config.local.yaml",
 		RunE:    func(cmd *cobra.Command, _ []string) error { return run(cmd, true) },
 	}, &cobra.Command{
-		Use: "setup", Short: "Configure an existing controller or explicitly manage a local core", Args: cobra.NoArgs,
+		Use: "setup", Short: "Configure a connection to an existing controller", Args: cobra.NoArgs,
 		Example: "  miocli setup\n  miocli setup --config /absolute/path/config.yaml",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if !deps.terminal(cmd) {

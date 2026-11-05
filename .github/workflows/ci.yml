@@ -84,7 +84,7 @@ jobs:
           go-version: stable
           cache: true
       - name: Test configuration and startup on the native platform
-        run: go test -race ./internal/config ./internal/core ./internal/cli
+        run: go test -race ./internal/config ./internal/cli
       - name: Test Shell installer behavior
         if: runner.os != 'Windows'
         run: sh tests/installers/shell.sh
@@ -161,7 +161,6 @@ jobs:
             fi
             MIOCLI_INTEGRATION_URL=http://127.0.0.1:19090 \
             MIOCLI_INTEGRATION_SECRET=miocli-ci-secret \
-            MIOCLI_INTEGRATION_CONFIG=/root/.config/mihomo/config.yaml \
               go test -count=1 -run '^TestMihomoIntegration$' ./internal/mihomo
             docker rm -f "$container"
             trap - EXIT

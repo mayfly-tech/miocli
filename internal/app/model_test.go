@@ -341,11 +341,18 @@ func TestMessageForAPIErrorDoesNotExposeRawSecret(t *testing.T) {
 	}
 }
 
-func newReadyModel(t *testing.T, client *fakeClient) *Model {
+func newReadyModel(t *testing.T, client mihomo.Client) *Model {
 	t.Helper()
 	model := New(context.Background(), client, "http://127.0.0.1:9090", true)
-	model.applyProxies(client.proxies)
-	model.mode = client.mode
+	proxies, err := client.Proxies(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	model.applyProxies(proxies)
+	model.mode, err = client.Mode(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
 	model.state = stateReady
 	t.Cleanup(model.shutdown)
 	return model

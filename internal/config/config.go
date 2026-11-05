@@ -17,20 +17,9 @@ import (
 
 const DefaultServer = "http://127.0.0.1:9090"
 
-const (
-	Connect = "connect"
-	Managed = "managed"
-)
-
-type Core struct {
-	Mode   string `yaml:"mode"`
-	Binary string `yaml:"binary,omitempty"`
-}
-
 type Config struct {
 	Server string `yaml:"server"`
 	Secret string `yaml:"secret"`
-	Core   Core   `yaml:"core"`
 }
 
 type Resolved struct {
@@ -69,7 +58,7 @@ func Resolve(overrides Overrides) (Resolved, error) {
 		}
 	}
 
-	cfg := Config{Server: DefaultServer, Core: Core{Mode: Connect}}
+	cfg := Config{Server: DefaultServer}
 	result := Resolved{Path: path, ServerSource: "default", SecretSource: "not set"}
 	data, err := os.ReadFile(path)
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
@@ -81,9 +70,9 @@ func Resolve(overrides Overrides) (Resolved, error) {
 	if err == nil {
 		result.Exists = true
 		var fileConfig struct {
-			Server *string `yaml:"server"`
-			Secret *string `yaml:"secret"`
-			Core   Core    `yaml:"core"`
+			Server *string   `yaml:"server"`
+			Secret *string   `yaml:"secret"`
+			Core   yaml.Node `yaml:"core"`
 		}
 		decoder := yaml.NewDecoder(strings.NewReader(string(data)))
 		decoder.KnownFields(true)
@@ -94,6 +83,9 @@ func Resolve(overrides Overrides) (Resolved, error) {
 		if err := decoder.Decode(&extra); err != io.EOF {
 			return Resolved{}, errors.New("config file must contain exactly one YAML document")
 		}
+		if fileConfig.Core.Kind != 0 {
+			return Resolved{}, errors.New("core configuration is no longer supported: remove the core field and configure server/secret for an already running Mihomo controller; miocli does not start or stop cores")
+		}
 		if fileConfig.Server != nil && *fileConfig.Server != "" {
 			cfg.Server = *fileConfig.Server
 			result.ServerSource = path
@@ -101,7 +93,6 @@ func Resolve(overrides Overrides) (Resolved, error) {
 		if fileConfig.Secret != nil {
 			cfg.Secret = *fileConfig.Secret
 		}
-		cfg.Core = fileConfig.Core
 		if cfg.Secret != "" {
 			result.SecretSource = path
 		}
@@ -119,16 +110,6 @@ func Resolve(overrides Overrides) (Resolved, error) {
 		cfg.Server = DefaultServer
 		result.ServerSource = "default"
 	}
-	if cfg.Core.Mode == "" {
-		cfg.Core.Mode = Connect
-	}
-	if cfg.Core.Mode != Connect && cfg.Core.Mode != Managed {
-		return Resolved{}, errors.New("core.mode must be connect or managed")
-	}
-	if cfg.Core.Mode == Connect && cfg.Core.Binary != "" {
-		return Resolved{}, errors.New("core.binary is only supported with core.mode: managed")
-	}
-
 	if value, ok := lookup("MIOCLI_SECRET"); ok && value != "" {
 		cfg.Secret = value
 		result.SecretSource = "MIOCLI_SECRET"

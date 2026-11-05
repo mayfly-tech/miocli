@@ -194,9 +194,6 @@ func (m *Model) cursorLine() string {
 		return prefix + label + " / " + safeText(rows[m.resourceIndex(rows)].cells[0])
 	default:
 		label := "Resources"
-		if m.page == pageProfiles {
-			label = "Profiles"
-		}
 		if m.page == pageProviders {
 			label = "Providers"
 		}

@@ -21,7 +21,7 @@ Bug 报告需填写 miocli/Mihomo 版本、系统与架构、连接模式、最�
 
 ## 提交信息
 
-首次提交前可运行 `sh scripts/install-hooks.sh` 安装本地提交信息检查。提交信息遵循 Conventional Commits，例如 `feat(cli): add profile command`。详见[开发指南](docs/development.md#提交信息与-git-hooks)。
+首次提交前可运行 `sh scripts/install-hooks.sh` 安装本地提交信息检查。提交信息遵循 Conventional Commits，例如 `feat(cli): improve controller diagnostics`。详见[开发指南](docs/development.md#提交信息与-git-hooks)。
 
 ## 提交前检查
 

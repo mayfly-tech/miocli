@@ -2,7 +2,6 @@ package mihomo
 
 import (
 	"context"
-	"encoding/json"
 	"net/http"
 	"testing"
 )
@@ -30,22 +29,6 @@ func TestProvidersDecodeAndUpdate(t *testing.T) {
 		t.Fatalf("provider = %#v", p)
 	}
 	if err := client.UpdateProvider(context.Background(), p.Name); err != nil {
-		t.Fatal(err)
-	}
-}
-
-func TestReloadUsesPathNotMode(t *testing.T) {
-	client := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
-		var body map[string]string
-		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-			t.Fatal(err)
-		}
-		if r.Method != http.MethodPut || r.URL.Path != "/configs" || body["path"] != "/private/config.yaml" || body["mode"] != "" {
-			t.Errorf("%s %s %#v", r.Method, r.URL, body)
-		}
-		w.WriteHeader(http.StatusNoContent)
-	}, "")
-	if err := client.Reload(context.Background(), "/private/config.yaml"); err != nil {
 		t.Fatal(err)
 	}
 }

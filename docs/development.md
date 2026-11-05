@@ -6,7 +6,7 @@
 
 - Go 1.24 或更新版本。
 - 单元测试不需要运行中的 Mihomo；API 测试使用 `httptest.Server` 和 fake client。
-- 集成测试会修改实例的节点、模式或配置，只能对专用的一次性实例运行。
+- 集成测试会修改实例的节点、模式或 provider，只能对专用的一次性实例运行。
 
 ## 本地配置
 
@@ -46,7 +46,7 @@ sh tests/installers/shell.sh
 sh scripts/install-hooks.sh
 ```
 
-提交信息须符合 Conventional Commits：`type(scope)!: subject`，scope 和破坏性变更标记 `!` 可选。支持的类型为 `feat`、`fix`、`docs`、`style`、`refactor`、`perf`、`test`、`build`、`ci`、`chore` 和 `revert`。例如：`feat(cli): add profile command`。Git 自动生成的合并、撤销、fixup 和 squash 提交信息不作校验。该 hook 只检查提交信息，不会运行格式化或测试；安装配置仅对当前克隆有效。
+提交信息须符合 Conventional Commits：`type(scope)!: subject`，scope 和破坏性变更标记 `!` 可选。支持的类型为 `feat`、`fix`、`docs`、`style`、`refactor`、`perf`、`test`、`build`、`ci`、`chore` 和 `revert`。例如：`feat(cli): improve controller diagnostics`。Git 自动生成的合并、撤销、fixup 和 squash 提交信息不作校验。该 hook 只检查提交信息，不会运行格式化或测试；安装配置仅对当前克隆有效。
 
 Windows 安装器测试：
 
@@ -74,21 +74,7 @@ MIOCLI_INTEGRATION_SECRET=miocli-ci-secret \
 go test -count=1 -run '^TestMihomoIntegration$' ./internal/mihomo
 ```
 
-`TestIsolated` 会启动并清理自己的子进程。先取得并校验 Mihomo 二进制，再传入其绝对路径：
-
-```sh
-MIOCLI_TEST_BINARY=/absolute/path/to/mihomo \
-go test -count=1 -run '^TestIsolated' ./internal/mihomo ./internal/profile
-```
-
-这些测试不读取用户配置、不连接日常实例。测试档案索引、事务日志和配置可能含敏感信息；样例、截图和日志须使用非敏感数据。
-
-`TestIsolatedPinnedBootstrap` 使用本机平台的固定版本压缩包和本地 HTTPS 测试服务器，从无内核目录下载、校验并启动真实子进程后清理：
-
-```sh
-MIOCLI_TEST_ARCHIVE=/absolute/path/to/pinned-mihomo.gz \
-go test -race -count=1 -run '^TestIsolatedPinnedBootstrap$' ./internal/core
-```
+CI 通过测试专用容器独立运行当前与上一稳定版本的 controller，使用仓库内的非敏感 fixture；生产程序不管理内核。配置、诊断信息和截图仍需脱敏。
 
 ## 发布流程
 
@@ -101,7 +87,7 @@ go test -race -count=1 -run '^TestIsolatedPinnedBootstrap$' ./internal/core
 
 正式 Release 先于资产创建，需等待 Release 工作流全部成功才能安装；期间 latest 安装可能因缺少资产而失败，但不会替换已有 CLI。发布工作流串行执行，不取消进行中的发布。版本包命名保持 `miocli_X.Y.Z_OS_ARCH.tar.gz`（Windows 为 `.zip`），每份包附带同名 `.sha256` 文件。
 
-发布包按目标平台导出第三方许可证，不跳过 Windows 专用依赖。`go-localereader` 固定在 `v0.0.2-0.20220822084737-6bae6c923850`：该提交相对 `v0.0.1` 仅补充上游 LICENSE，无代码变更，避免 Windows 打包时因缺少许可证失败。
+发布包按目标平台导出第三方许可证，不跳过 Windows 专用依赖。`go-localereader` 固定在包含上游 LICENSE 的 `v0.0.2-0.20220822084737-6bae6c923850`，确保 Windows 打包时可以导出许可证。
 
 ### 权限与检查
 
@@ -119,11 +105,9 @@ CI、构建或上传失败时，在同一次工作流运行中选择“重新运
 
 本地工作流和安装器测试不创建真实发布 PR、标签或 Release。端到端验收仍需在 GitHub 上成功运行发布流程；本地测试通过不代表仓库权限、分支保护或远端发布已验证。
 
-### Mihomo 版本维护
+### Mihomo 兼容性
 
-升级 Mihomo 时修改 `internal/core/mihomo-release.json`：确认官方稳定版本、全部六个平台文件名、原始压缩包 SHA-256 和许可证；优先可移植 amd64 baseline。更新中英文 README 的固定版本说明，执行映射/下载测试和隔离实例兼容测试。不要仅修改版本字符串或在客户端查询 latest。
-
-Mihomo 是独立的 GPL-3.0 程序，不由本工作流镜像或上传。客户端仅从官方 GitHub Release 下载并校验固定版本；GitHub 不可达时需在 setup 中指定已有本地内核。
+miocli 不固定、下载或升级用户内核。兼容性通过已有 controller API 的单元测试及 CI 当前/上一稳定版本集成测试验证。需要扩展 API 时更新 DTO、错误分类、fake client、集成 fixture 和文档，不向产品引入内核分发或进程管理。
 
 ## 卸载与清理
 
@@ -133,7 +117,7 @@ Mihomo 是独立的 GPL-3.0 程序，不由本工作流镜像或上传。客户�
 
 - API DTO 与领域类型属于 `internal/mihomo`；UI 不直接构造 HTTP 请求。
 - 网络操作由 Bubble Tea `tea.Cmd` 启动，结果通过有类型的消息更新 Model。
-- 档案存储与热加载属于 `internal/profile`；仅本次实际启动的托管子进程拥有完整档案写权限。
+- 连接配置和指定 Mihomo YAML 的只读提取由 `internal/config` 负责；UI 不写源配置，也不管理内核进程。
 - 配置优先级、安全策略或 API 映射变化时，同步更新测试、README 与[架构说明](architecture.md)。
 
 贡献流程见[贡献指南](../CONTRIBUTING.md)。

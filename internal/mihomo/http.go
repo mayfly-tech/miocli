@@ -152,10 +152,6 @@ func (c *HTTPClient) UpdateProvider(ctx context.Context, name string) error {
 	return c.doJSON(ctx, http.MethodPut, "/providers/proxies/"+url.PathEscape(name), nil, nil)
 }
 
-func (c *HTTPClient) Reload(ctx context.Context, path string) error {
-	return c.doJSON(ctx, http.MethodPut, "/configs", map[string]string{"path": path}, nil)
-}
-
 func (c *HTTPClient) Connections(ctx context.Context) ([]Connection, error) {
 	var response struct {
 		Connections json.RawMessage `json:"connections"`

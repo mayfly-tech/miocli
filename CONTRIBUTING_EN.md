@@ -21,7 +21,7 @@ Public text, logs, screenshots and configuration snippets must not contain contr
 
 ## Commit messages
 
-Before your first commit, you can install the local commit message check with `sh scripts/install-hooks.sh`. Commit messages follow Conventional Commits, for example `feat(cli): add profile command`. See the [development guide](docs/development_EN.md#commit-messages-and-git-hooks) for details.
+Before your first commit, you can install the local commit message check with `sh scripts/install-hooks.sh`. Commit messages follow Conventional Commits, for example `feat(cli): improve controller diagnostics`. See the [development guide](docs/development_EN.md#commit-messages-and-git-hooks) for details.
 
 ## Checks before opening a pull request
 

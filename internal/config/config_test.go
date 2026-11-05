@@ -121,7 +121,7 @@ func TestLoadRejectsUnknownFieldsAndMissingExplicitFile(t *testing.T) {
 
 func TestSaveWritesPrivateConfig(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "nested", "config.yaml")
-	want := Config{Server: DefaultServer, Secret: "private", Core: Core{Mode: Connect}}
+	want := Config{Server: DefaultServer, Secret: "private"}
 	if err := Save(path, want); err != nil {
 		t.Fatal(err)
 	}

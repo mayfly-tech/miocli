@@ -13,7 +13,6 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"miocli/internal/mihomo"
-	"miocli/internal/profile"
 	"miocli/internal/theme"
 )
 
@@ -81,11 +80,6 @@ type Model struct {
 	detailOffset      int
 	lastRefresh       time.Time
 	generation        uint64
-	profileService    *profile.Service
-	profileIndex      profile.Index
-	profileErr        string
-	profilePending    bool
-	dialog            *profileDialog
 
 	search      textinput.Model
 	searching   bool
@@ -169,7 +163,7 @@ func New(ctx context.Context, client mihomo.Client, server string, noColor bool,
 	search.Width = 32
 	command := theme.Input(noColor)
 	command.Prompt = ": "
-	command.Placeholder = "groups · nodes · profiles · providers · status · help"
+	command.Placeholder = "groups · nodes · providers · status · help"
 	command.CharLimit = 128
 	model := &Model{
 		client:      client,
@@ -190,7 +184,7 @@ func New(ctx context.Context, client mihomo.Client, server string, noColor bool,
 }
 
 func (m *Model) Init() tea.Cmd {
-	return tea.Batch(bootstrapCmd(m.ctx, m.client), m.loadProviders(), m.loadProfiles(), m.loadConnections())
+	return tea.Batch(bootstrapCmd(m.ctx, m.client), m.loadProviders(), m.loadConnections())
 }
 
 func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
@@ -204,27 +198,6 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			m.connectionsError = messageForError(msg.err)
 		} else {
 			m.connections, m.connectionsLoaded, m.connectionsError = msg.items, true, ""
-		}
-		return m, nil
-	case profilesMsg:
-		if msg.generation != m.generation {
-			return m, nil
-		}
-		m.profileIndex = msg.index
-		m.profileErr = msg.listErr
-		m.profilePending = msg.pending
-		if msg.operation {
-			m.operation = ""
-			if msg.err != nil {
-				m.lastError = safeText(msg.err.Error())
-			} else if msg.listErr != "" {
-				m.lastError = "Profile operation completed, but records could not be read: " + msg.listErr
-			} else {
-				m.lastError = ""
-				m.notice = "Profile operation confirmed"
-			}
-			m.pollRetries = 0
-			return m, tea.Batch(m.startRefresh(), m.loadProviders())
 		}
 		return m, nil
 	case providersMsg:
@@ -248,6 +221,8 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 				m.notice = "Provider update completed; status refreshed"
 				m.lastError = ""
 			}
+			m.pollRetries = 0
+			return m, m.startRefresh()
 		}
 		return m, nil
 	case tea.WindowSizeMsg:
@@ -255,11 +230,6 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		m.command.Width = max(1, msg.Width-14)
 		if m.width > 4 {
 			m.search.Width = max(1, m.width-35)
-		}
-		if m.dialog != nil {
-			for i := range m.dialog.fields {
-				m.dialog.fields[i].Width = max(1, msg.Width-8)
-			}
 		}
 		return m, nil
 	case bootstrapMsg:

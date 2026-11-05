@@ -129,7 +129,7 @@ func TestColorPolicyReachesPanel(t *testing.T) {
 		path := isolatedConfig(t)
 		t.Setenv("NO_COLOR", tc.env)
 		t.Setenv("TERM", tc.term)
-		if err := config.Save(path, config.Config{Server: config.DefaultServer, Core: config.Core{Mode: config.Connect}}); err != nil {
+		if err := config.Save(path, config.Config{Server: config.DefaultServer}); err != nil {
 			t.Fatal(err)
 		}
 		deps := defaultDependencies()

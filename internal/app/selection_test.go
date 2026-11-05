@@ -16,7 +16,7 @@ func TestSelectedNodeVisibleOnEveryResourcePage(t *testing.T) {
 	m.width, m.height = 100, 24
 	m.connectionsLoaded = true
 	m.connections = []mihomo.Connection{{Chains: []string{"Node A", "Manual"}}}
-	for _, page := range []resourcePage{pageGroups, pageProviders, pageProfiles, pageNodes, pageStatus} {
+	for _, page := range []resourcePage{pageGroups, pageProviders, pageNodes, pageStatus} {
 		m.changePage(page)
 		view := m.View()
 		if !strings.Contains(view, "Selected: Manual → Node A") {
@@ -136,8 +136,9 @@ func TestCursorFollowsGroupMembersAndFiltering(t *testing.T) {
 	if got := m.cursorLine(); got != "Cursor: Providers / no matches" {
 		t.Fatal(got)
 	}
-	m.changePage(pageProfiles)
-	if got := m.cursorLine(); got != "Cursor: Profiles / no matches" {
+	m.changePage(pageProviders)
+	m.providers = nil
+	if got := m.cursorLine(); got != "Cursor: Providers / no matches" {
 		t.Fatal(got)
 	}
 }
