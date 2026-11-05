@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.4](https://github.com/mayfly-tech/miocli/compare/v0.1.3...v0.1.4) (2026-11-05)
+
+
+### Bug Fixes
+
+* update ([e6de1b7](https://github.com/mayfly-tech/miocli/commit/e6de1b7540e450322f6019ab703ea0510c59cb24))
+
 ## [0.1.3](https://github.com/mayfly-tech/miocli/compare/v0.1.2...v0.1.3) (2026-11-04)
 
 
