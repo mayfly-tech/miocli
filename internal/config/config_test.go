@@ -121,7 +121,7 @@ func TestLoadRejectsUnknownFieldsAndMissingExplicitFile(t *testing.T) {
 
 func TestSaveWritesPrivateConfig(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "nested", "config.yaml")
-	want := Config{Server: DefaultServer, Secret: "private", Core: Core{Mode: Connect}}
+	want := Config{Server: DefaultServer, Secret: "private"}
 	if err := Save(path, want); err != nil {
 		t.Fatal(err)
 	}
@@ -150,6 +150,7 @@ func TestDefaultPathRejectsRelativeXDGConfigHome(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("Windows uses APPDATA")
 	}
+
 	_, err := DefaultPath(func(key string) (string, bool) {
 		if key == "XDG_CONFIG_HOME" {
 			return "relative/path", true
@@ -158,5 +159,42 @@ func TestDefaultPathRejectsRelativeXDGConfigHome(t *testing.T) {
 	})
 	if err == nil || !strings.Contains(err.Error(), "absolute path") {
 		t.Fatalf("DefaultPath() error = %v, want absolute-path error", err)
+	}
+}
+
+func TestUnixServerAndPersistentProfileConfig(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		if _, err := ValidateServer("unix:///tmp/control.sock"); err == nil {
+			t.Fatal("Windows accepted Unix controller")
+		}
+		return
+	}
+	server := "unix:///tmp/control.sock"
+	if got, err := ValidateServer(server); err != nil || got != server {
+		t.Fatalf("Unix server = %q, %v", got, err)
+	}
+	if got, err := ValidateServer("unix:/tmp/control.sock"); err != nil || got != server {
+		t.Fatalf("canonical Unix server = %q, %v", got, err)
+	}
+	for _, value := range []string{"unix://host/tmp/c.sock", "unix:relative", "unix:///", "unix:///tmp/../c.sock", "unix:///tmp/c.sock?", "unix:///tmp/%00.sock"} {
+		if _, err := ValidateServer(value); err == nil {
+			t.Errorf("accepted %q", value)
+		}
+	}
+	path := filepath.Join(t.TempDir(), "miocli.yaml")
+	want := Config{Server: server, ActiveProfilePath: "/etc/mihomo/config.yaml"}
+	if err := Save(path, want); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(Overrides{ConfigPath: path, LookupEnv: func(string) (string, bool) { return "", false }})
+	if err != nil || cfg != want {
+		t.Fatalf("persistent settings = %#v, %v", cfg, err)
+	}
+	want.ActiveProfilePath = "relative.yaml"
+	if err := Save(path, want); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(Overrides{ConfigPath: path}); err == nil {
+		t.Fatal("accepted relative active-profile-path")
 	}
 }

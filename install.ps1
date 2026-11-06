@@ -9,10 +9,20 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+
+function Get-RequestTimeouts([string]$Command, [int]$Connect, [int]$Operation) {
+    $parameters = (Get-Command "Microsoft.PowerShell.Utility\$Command").Parameters
+    if ($parameters.ContainsKey("OperationTimeoutSeconds")) {
+        return @{ ConnectionTimeoutSeconds = $Connect; OperationTimeoutSeconds = $Operation }
+    }
+    return @{ TimeoutSec = $Operation }
+}
+
 if ($Help) {
     Write-Output "Usage: install.ps1 [-Version VERSION] [-InstallDir DIR] [-Yes] [-NonInteractive] [-Setup] [-Help]"
     Write-Output "Install only miocli. PATH and existing Mihomo/Clash Verge settings are never modified."
     Write-Output "MIOCLI_INSTALL_DIR overrides the user install directory. -Yes confirms CLI replacement only."
+    Write-Output "Release packages and checksums are downloaded from GitHub over HTTPS."
     return
 }
 $repository = "__MIOCLI_REPOSITORY__"
@@ -50,16 +60,20 @@ switch ($architectureCode) {
     default { throw "Unsupported Windows processor architecture: $architectureCode" }
 }
 if (-not $Version) {
-    $release = Invoke-RestMethod -Uri "https://api.github.com/repos/$repository/releases/latest" -TimeoutSec 30
+    try {
+        $timeouts = Get-RequestTimeouts "Invoke-RestMethod" 5 15
+        $release = Invoke-RestMethod -Uri "https://api.github.com/repos/$repository/releases/latest" @timeouts
+    } catch {
+        throw "GitHub version lookup failed; existing CLI unchanged. $($_.Exception.Message)"
+    }
     $Version = $release.tag_name
 }
-if ($Version -notmatch '^v?[0-9]+\.[0-9]+\.[0-9]+([+-][A-Za-z0-9.-]+)?$') {
+if ($Version -notmatch '^v?[0-9]+\.[0-9]+\.[0-9]+([+-][A-Za-z0-9.-]+)?\z') {
     throw "Version must be a semantic version such as v1.2.3."
 }
 if (-not $Version.StartsWith("v")) { $Version = "v$Version" }
 $versionNumber = $Version.Substring(1)
 $archive = "miocli_${versionNumber}_windows_${architecture}.zip"
-$baseUrl = "https://github.com/$repository/releases/download/$Version"
 Write-Output "Install miocli $Version (windows/$architecture) to $target"
 New-Item -ItemType Directory -Path $InstallDir -Force | Out-Null
 $temporaryDirectory = Join-Path ([System.IO.Path]::GetTempPath()) ("miocli-install-" + [Guid]::NewGuid().ToString("N"))
@@ -69,8 +83,14 @@ try {
     New-Item -ItemType File -Path $staged | Out-Null
     $archivePath = Join-Path $temporaryDirectory $archive
     $checksumPath = "$archivePath.sha256"
-    Invoke-WebRequest -Uri "$baseUrl/$archive" -OutFile $archivePath -TimeoutSec 180
-    Invoke-WebRequest -Uri "$baseUrl/$archive.sha256" -OutFile $checksumPath -TimeoutSec 60
+    try {
+        $baseUrl = "https://github.com/$repository/releases/download/$Version"
+        $timeouts = Get-RequestTimeouts "Invoke-WebRequest" 8 30
+        Invoke-WebRequest -Uri "$baseUrl/$archive" -OutFile $archivePath @timeouts -MaximumRedirection 5 -UseBasicParsing | Out-Null
+        Invoke-WebRequest -Uri "$baseUrl/$archive.sha256" -OutFile $checksumPath @timeouts -MaximumRedirection 5 -UseBasicParsing | Out-Null
+    } catch {
+        throw "GitHub download failed for $Version; existing CLI unchanged. $($_.Exception.Message)"
+    }
     $checksumLine = Get-Content -LiteralPath $checksumPath -Raw
     if ($checksumLine -notmatch '^\s*([0-9a-fA-F]{64})\s+(.+?)\s*$' -or $Matches[2] -ne $archive) {
         throw "Release checksum file is invalid."
@@ -88,14 +108,14 @@ try {
     Copy-Item -LiteralPath $binaryPath -Destination $staged -Force
     try {
         if (Test-Path -LiteralPath $target) {
-            [System.IO.File]::Replace($staged, $target, $null)
+            [System.IO.File]::Replace($staged, $target, [System.Management.Automation.Language.NullString]::Value)
         } else {
             [System.IO.File]::Move($staged, $target)
         }
     } catch {
         throw "Could not replace CLI at $target. Close running miocli processes and retry. $($_.Exception.Message)"
     }
-    Write-Output "Installed miocli $Version to $target"
+    Write-Output "Installed miocli $Version from GitHub to $target"
     Write-Output "Only miocli was installed. Existing Clash Verge/Mihomo users do not need a second core."
     if (($env:Path -split ';') -notcontains $InstallDir) {
         $quotedDir = $InstallDir.Replace("'", "''")

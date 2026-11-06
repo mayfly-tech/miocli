@@ -2,20 +2,45 @@ name: Release
 
 on:
   push:
-    tags:
-      - "v*"
+    branches:
+      - main
 
 permissions:
   contents: read
 
+concurrency:
+  group: release
+  cancel-in-progress: false
+
 jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+    outputs:
+      release_created: ${{ steps.release.outputs.release_created }}
+      tag_name: ${{ steps.release.outputs.tag_name }}
+      sha: ${{ steps.release.outputs.sha }}
+    steps:
+      - uses: googleapis/release-please-action@v4
+        id: release
+        with:
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+
   preflight:
+    needs: release-please
+    if: needs.release-please.outputs.release_created == 'true'
     uses: ./.github/workflows/ci.yml
+    with:
+      ref: ${{ needs.release-please.outputs.sha }}
     permissions:
       contents: read
 
   build:
-    needs: preflight
+    needs: [release-please, preflight]
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -47,6 +72,8 @@ jobs:
             archive: zip
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.release-please.outputs.sha }}
       - uses: actions/setup-go@v5
         with:
           go-version: stable
@@ -59,14 +86,14 @@ jobs:
           GOARCH: ${{ matrix.goarch }}
           EXTENSION: ${{ matrix.extension }}
           ARCHIVE: ${{ matrix.archive }}
-          COMMIT: ${{ github.sha }}
-          REF_NAME: ${{ github.ref_name }}
+          COMMIT: ${{ needs.release-please.outputs.sha }}
+          RELEASE_TAG: ${{ needs.release-please.outputs.tag_name }}
         run: |
-          if [[ ! "$REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([+-][A-Za-z0-9.-]+)?$ ]]; then
+          if [[ ! "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([+-][A-Za-z0-9.-]+)?$ ]]; then
             echo "Tag must be a semantic version: vMAJOR.MINOR.PATCH"
             exit 1
           fi
-          version="${REF_NAME#v}"
+          version="${RELEASE_TAG#v}"
           build_date="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
           name="miocli_${version}_${GOOS}_${GOARCH}"
           mkdir -p "dist/${name}"
@@ -74,7 +101,10 @@ jobs:
             -ldflags "-s -w -X miocli/internal/cli.version=${version} -X miocli/internal/cli.commit=${COMMIT} -X miocli/internal/cli.buildDate=${build_date}" \
             -o "dist/${name}/miocli${EXTENSION}" ./cmd/miocli
           "$(go env GOPATH)/bin/go-licenses" save ./cmd/miocli --save_path="dist/${name}/THIRD_PARTY_LICENSES"
-          cp README.md README_EN.md LICENSE "dist/${name}/"
+          cp README.md README.zh-CN.md \
+            CONTRIBUTING.md CONTRIBUTING.zh-CN.md SECURITY.md SECURITY.zh-CN.md \
+            CHANGELOG.md LICENSE "dist/${name}/"
+          cp -R docs "dist/${name}/docs"
           if [ "$ARCHIVE" = "zip" ]; then
             (cd dist && zip -q -r "${name}.zip" "$name" && sha256sum "${name}.zip" > "${name}.zip.sha256")
           else
@@ -83,14 +113,19 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: release-${{ matrix.goos }}-${{ matrix.goarch }}
-          path: dist/*.*
+          path: |
+            dist/*.tar.gz
+            dist/*.zip
+            dist/*.sha256
           if-no-files-found: error
 
   installers:
-    needs: preflight
+    needs: [release-please, preflight]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.release-please.outputs.sha }}
       - name: Configure installer repository
         run: |
           mkdir -p dist
@@ -102,18 +137,41 @@ jobs:
           path: dist/install.*
           if-no-files-found: error
 
-  draft:
-    needs: [build, installers]
+  upload:
+    needs: [release-please, build, installers]
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
       - uses: actions/download-artifact@v4
         with:
+          pattern: release-*
           path: release-assets
           merge-multiple: true
-      - uses: softprops/action-gh-release@v2
-        with:
-          draft: true
-          generate_release_notes: true
-          files: release-assets/*
+      - name: Verify and upload release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ needs.release-please.outputs.tag_name }}
+        working-directory: release-assets
+        run: |
+          if [[ ! "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([+-][A-Za-z0-9.-]+)?$ ]]; then
+            echo "Tag must be a semantic version: vMAJOR.MINOR.PATCH"
+            exit 1
+          fi
+          files=(install.sh install.ps1)
+          for os in linux darwin windows; do
+            extension=tar.gz
+            if [ "$os" = windows ]; then extension=zip; fi
+            for arch in amd64 arm64; do
+              archive="miocli_${RELEASE_TAG#v}_${os}_${arch}.${extension}"
+              files+=("$archive" "$archive.sha256")
+            done
+          done
+          for file in "${files[@]}"; do
+            if [ ! -s "$file" ]; then
+              echo "Missing or empty release asset: $file"
+              exit 1
+            fi
+          done
+          sha256sum --check --strict ./*.sha256
+          gh release upload "$RELEASE_TAG" "${files[@]}" --repo "$GITHUB_REPOSITORY" --clobber

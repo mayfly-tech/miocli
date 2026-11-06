@@ -341,11 +341,18 @@ func TestMessageForAPIErrorDoesNotExposeRawSecret(t *testing.T) {
 	}
 }
 
-func newReadyModel(t *testing.T, client *fakeClient) *Model {
+func newReadyModel(t *testing.T, client mihomo.Client) *Model {
 	t.Helper()
 	model := New(context.Background(), client, "http://127.0.0.1:9090", true)
-	model.applyProxies(client.proxies)
-	model.mode = client.mode
+	proxies, err := client.Proxies(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	model.applyProxies(proxies)
+	model.mode, err = client.Mode(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
 	model.state = stateReady
 	t.Cleanup(model.shutdown)
 	return model
@@ -354,4 +361,29 @@ func newReadyModel(t *testing.T, client *fakeClient) *Model {
 func appendProxyName(proxy mihomo.Proxy, name string) mihomo.Proxy {
 	proxy.All = append(proxy.All, name)
 	return proxy
+}
+
+func TestSelectionInvalidatesInFlightRefresh(t *testing.T) {
+	m := newReadyModel(t, newFakeClient())
+	m.focusRight, m.rowIndex = true, 1
+	old := m.proxies
+	oldGeneration := m.generation
+	cmd := m.activateSelection()
+	if cmd == nil {
+		t.Fatal("selection did not start")
+	}
+	_, _ = m.Update(cmd())
+	_, _ = m.Update(refreshMsg{generation: oldGeneration, proxies: old, mode: mihomo.ModeRule})
+	if m.proxies.Items["Manual"].Now != "Node B" {
+		t.Fatal("old refresh replaced the confirmed selection")
+	}
+}
+
+func TestRefreshUpdatesModeWhenProxiesFail(t *testing.T) {
+	m := newReadyModel(t, newFakeClient())
+	_, cmd := m.Update(refreshMsg{generation: m.generation, mode: mihomo.ModeGlobal,
+		proxiesErr: &mihomo.APIError{Kind: mihomo.ErrorNetwork, Op: "proxies"}})
+	if cmd == nil || m.mode != mihomo.ModeGlobal || m.refreshError == "" {
+		t.Fatalf("independent mode read lost: mode=%s, error=%q", m.mode, m.refreshError)
+	}
 }

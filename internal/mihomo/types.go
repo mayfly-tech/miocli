@@ -65,6 +65,14 @@ const (
 	ModeDirect Mode = "direct"
 )
 
+type RuntimeConfig struct {
+	Mode        Mode   `json:"mode"`
+	BindAddress string `json:"bind-address"`
+	Port        int    `json:"port"`
+	SocksPort   int    `json:"socks-port"`
+	MixedPort   int    `json:"mixed-port"`
+}
+
 type Client interface {
 	Version(context.Context) (Version, error)
 	Proxies(context.Context) (Proxies, error)

@@ -1,35 +1,56 @@
 # miocli
 
-简体中文 · [English](README_EN.md)
+English · [简体中文](README.zh-CN.md)
 
-`miocli` 是面向单个 [Mihomo](https://github.com/MetaCubeX/mihomo) 实例的键盘优先终端控制面板。可浏览代理组和节点、切换节点与代理模式、测试延迟，并查看或更新 providers。
+A keyboard-first terminal operations console for one already running [Mihomo](https://github.com/MetaCubeX/mihomo) instance.
 
-## 功能
+Browse proxy groups and nodes, change selections and modes, test latency, and update proxy providers from a local terminal or an SSH session. Inspired by the resource-oriented workflow of [k9s](https://github.com/derailed/k9s), miocli connects to your existing controller instead of owning its lifecycle.
 
-- 全屏英文界面：Subscriptions、Groups、Nodes、Status。
-- 浏览嵌套代理组，搜索组和成员；切换 `Selector` 组节点并读取 API 确认结果。
-- 按协议或来源筛选节点，按 API 顺序、名称或延迟排序；测试单个节点、筛选结果或当前组的直接成员。
-- 在 Rule、Global、Direct 模式间切换；查看和手动更新 Mihomo proxy-providers。
-- 对本次启动的托管内核管理本地 YAML/HTTPS 档案，确认后验证并热加载。
-- 连接单个 Mihomo controller；支持回环 HTTP 和经过证书验证的 HTTPS。
+## What it does
 
-## 快速开始
+| Resource or command | Daily tasks |
+| --- | --- |
+| **Groups** | Search groups and members, explore nested groups, select members of `Selector` groups |
+| **Nodes** | Browse global and provider-only nodes, filter by protocol/source, sort, test latency |
+| **Providers** | Inspect proxy providers and manually request an update |
+| **Profiles** | Download and save HTTPS Mihomo YAML profiles; switch/reload through a local controller |
+| **Status** | Inspect the controller, selected group path, active-route summaries and diagnostics |
 
-### 安装
+The interface is in English. Groups opens by default. Write operations read back controller state; inspect the refreshed state after making changes.
 
-从 GitHub Release 下载对应安装脚本：
+**Scope:** miocli does not install, start, stop or upgrade Mihomo. It does not manage TUN, services or multiple controllers. Its optional system-proxy switch changes only the current user's/network service's proxy settings and restores prior values when disabled; it never takes over core lifecycle.
+
+## Quick start
+
+You need a running Mihomo instance with a reachable control API and its secret, if configured. The control API is **not** the HTTP/SOCKS proxy port. The console requires an interactive terminal of at least **50 columns × 12 rows**.
+
+### 1. Install
+
+Download the installer for your platform, inspect it, then run it. Do not pipe downloaded scripts directly into a shell.
+
+**Linux / macOS**
 
 ```sh
-# Linux / macOS
+curl --fail --show-error --location --proto '=https' --proto-redir '=https' \
+  --max-redirs 5 --connect-timeout 15 --max-time 60 \
+  https://github.com/mayfly-tech/miocli/releases/latest/download/install.sh -o install.sh
+# Review install.sh before continuing.
 sh install.sh
+```
 
-# Windows PowerShell
+**Windows PowerShell**
+
+```powershell
+[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+Invoke-WebRequest https://github.com/mayfly-tech/miocli/releases/latest/download/install.ps1 `
+  -OutFile install.ps1 -TimeoutSec 60 -MaximumRedirection 5 -UseBasicParsing
+# Review install.ps1 before continuing.
 powershell -ExecutionPolicy Bypass -File .\install.ps1
 ```
 
-安装器校验发布包 SHA-256，并将 CLI 安装到用户目录，不需要管理员权限。已有 Clash Verge 等客户端时，只需可访问的 Mihomo 控制 API；无需安装第二个内核。
+Installers verify SHA-256 and install to a user directory without administrator privileges. **They do not modify PATH.** Follow the printed PATH instructions or invoke the installed binary by its full path. See [installation](docs/installation.md) for supported platforms, manual installation, upgrades and removal.
 
-### 连接已有内核
+### 2. Connect
 
 ```sh
 miocli setup
@@ -37,74 +58,38 @@ miocli doctor
 miocli
 ```
 
-在 setup 中选择连接已有内核，填写 `external-controller` 地址和 `secret`；这是控制 API 地址，不是 HTTP/SOCKS 代理端口。也可以指定 Mihomo YAML，只读提取这两项。程序不扫描客户端目录、不猜测密钥，也不修改原配置。
+`setup` accepts a controller URL and hidden secret, or reads connection fields from a specified Mihomo YAML without changing it. It checks the API and asks before saving miocli's own settings. Secrets are stored in protected YAML, not an OS keychain.
 
-无配置时，程序先尝试 `http://127.0.0.1:9090`。连接失败时只在交互终端提供 setup；不会自动安装或启动内核。`doctor` 只读检查配置和 API。
+Local HTTP must use a loopback address. Linux/macOS also support `--server unix:///absolute/control.sock`, subject to socket permissions. Remote controllers require certificate-validated HTTPS or an [SSH tunnel](docs/configuration.md#remote-controllers).
 
-### 本地开发
+### 3. Operate
 
-```sh
-cp config.local.example.yaml config.local.yaml
-chmod 600 config.local.yaml
-go run ./cmd/miocli dev
-```
+- `1` / `2` / `3` / `4`: Groups / Nodes / Providers / Status.
+- In Groups, `Enter` focuses members or selects a member; `→` / `l` enters a nested group.
+- In Nodes, `Space` tests one node; `T` tests the filtered list.
+- In Providers, `u` requests an update.
+- `miocli profile add NAME HTTPS_URL` / `update` / `list` / `use` manage profiles.
+- `miocli system-proxy enable|disable|status` manages the system proxy.
+- `?` opens help; `q` or `Ctrl+C` exits without stopping Mihomo.
 
-在本地配置中填写已有 controller 的地址和密钥。`dev` 只连接，不写用户配置、不下载或启动内核。Windows 使用 `Copy-Item` 复制模板，无需 `chmod`。更多说明见[开发指南](docs/development.md)。
+See the [usage guide](docs/usage.md) for complete per-view keys and operation semantics.
 
-### 托管内核
+## Documentation
 
-在 setup 中明确选择 managed，并确认导入配置和下载（如需要）。miocli 管理所选配置的副本；运行时只停止本次启动的子进程。连接失败不会自动切换为托管模式。详见[产品说明](docs/product.md)。
-
-托管模式不修改源配置。导入前需关闭 TUN 和自定义监听，并确保相对路径引用的资源可用；缺少内核时，需单独确认从官方 Release 下载。设置仅在配置验证成功后保存。
-
-## 配置
-
-配置文件路径：
-
-- Linux/macOS：`$XDG_CONFIG_HOME/miocli/config.yaml`；未设置 `XDG_CONFIG_HOME` 时为 `~/.config/miocli/config.yaml`。
-- Windows：`%AppData%\miocli\config.yaml`。
-
-```yaml
-server: http://127.0.0.1:9090
-secret: ""
-core:
-  mode: connect
-```
-
-服务地址优先级：`--server` > 非空 `MIOCLI_SERVER` > YAML > 默认地址。密钥优先级：非空 `MIOCLI_SECRET` > YAML > 不认证。`--config` 指定唯一配置文件，不会与其他配置合并；`--server` 仅对本次连接生效。不要将密钥作为命令行参数传入。
-
-## 快捷键
-
-| 按键 | 操作 |
-| --- | --- |
-| `1` / `2` / `3` / `4` | Subscriptions / Groups / Nodes / Status |
-| `:` | 命令栏，如 `groups`、`nodes`、`providers`、`mode rule` |
-| `Tab` / `Shift+Tab` | 切换列表、详情或分组/成员 |
-| `↑` / `↓`、`j` / `k` | 移动选择 |
-| `Enter` / `→` | 打开详情；选择成员 / 进入嵌套组 |
-| `/` | 搜索当前资源 |
-| `Space` / `T` | 测试节点或当前组直接成员 |
-| `s` / `t` / `f` | 节点排序 / 协议筛选 / 来源筛选 |
-| `m` | 切换 Rule、Global、Direct |
-| `r` / `?` | 刷新或重连 / 显示帮助 |
-| `Esc` | 清除搜索、关闭对话框或返回 |
-| `q` / `Ctrl+C` | 退出 |
-
-Subscriptions 中 `p` 切换档案与 providers；档案操作使用 `a` / `e` / `u` / `d`，`Space` 启用。完整交互说明见 [README 英文版](README_EN.md#keyboard-shortcuts)。
-
-## 文档
-
-| 文档 | 简体中文 | English |
+| Start here | Reference | Contribute and maintain |
 | --- | --- | --- |
-| 产品与功能 | [产品说明](docs/product.md) | [Product](docs/product_EN.md) |
-| 架构与实现 | [架构说明](docs/architecture.md) | [Architecture](docs/architecture_EN.md) |
-| 开发与测试 | [开发指南](docs/development.md) | [Development](docs/development_EN.md) |
-| 贡献 | [贡献指南](CONTRIBUTING.md) | [Contributing](CONTRIBUTING_EN.md) |
+| [Installation](docs/installation.md) | [Configuration](docs/configuration.md) | [Contributing](CONTRIBUTING.md) |
+| [Usage](docs/usage.md) | [CLI commands](docs/cli.md) | [Development](docs/development.md) |
+| [Troubleshooting](docs/troubleshooting.md) | [Architecture and API](docs/architecture.md) | [Releasing](docs/releasing.md) |
 
-## 隐私与安全
+[All documentation](docs/README.md) · [完整中文文档](docs/zh-CN/README.md) · [Changelog](CHANGELOG.md)
 
-miocli 不包含账号、遥测或后台自动更新检查。凭据只发送到配置的控制器。托管内核的下载需在 setup 中单独确认。配置和诊断日志可能包含敏感信息，分享前请检查并脱敏。漏洞请通过 GitHub Security Advisories 私下报告。
+## Privacy and security
 
-## 许可证
+No accounts, telemetry or background update checks are included. Controller requests ignore environment proxies and do not follow redirects. Configuration, resource names and screenshots can still be sensitive: redact them before sharing.
 
-MIT，详见 [LICENSE](LICENSE)。
+Installer downloads use HTTPS. Co-hosted SHA-256 files detect corruption but do not independently authenticate a compromised release source; packages are not independently signed. See the [security policy](SECURITY.md) for private vulnerability reports and supported security fixes.
+
+## License
+
+[MIT](LICENSE).

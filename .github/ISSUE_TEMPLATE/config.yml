@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security vulnerability / 安全漏洞
+    url: https://github.com/mayfly-tech/miocli/security/policy
+    about: Read the security policy and report vulnerabilities privately. / 阅读安全政策并私下报告漏洞。

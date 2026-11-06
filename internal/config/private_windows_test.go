@@ -11,7 +11,7 @@ import (
 
 func TestSavedConfigHasPrivateWindowsACL(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.yaml")
-	cfg := Config{Server: DefaultServer, Secret: "test-secret", Core: Core{Mode: Connect}}
+	cfg := Config{Server: DefaultServer, Secret: "test-secret"}
 	for range 2 {
 		if err := Save(path, cfg); err != nil {
 			t.Fatal(err)
@@ -28,7 +28,12 @@ func TestSavedConfigHasPrivateWindowsACL(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		wantACE := "(A;;FA;;;" + user.User.Sid.String() + ")"
+		expected, err := windows.SecurityDescriptorFromString("D:P(A;;FA;;;" + user.User.Sid.String() + ")")
+		if err != nil {
+			t.Fatal(err)
+		}
+		// Windows may serialize well-known account SIDs as aliases such as LA.
+		wantACE := strings.TrimPrefix(expected.String(), "D:P")
 		sddl := descriptor.String()
 		if control&windows.SE_DACL_PROTECTED == 0 || strings.Count(sddl, "(") != 1 || !strings.Contains(sddl, wantACE) {
 			t.Fatalf("private ACL = %s, want protected DACL with only %s", sddl, wantACE)

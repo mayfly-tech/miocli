@@ -1,55 +1,89 @@
-# 架构与实现
+# Architecture and API
 
-简体中文 · [English](architecture_EN.md) · [README](../README.md)
+English · [简体中文](zh-CN/architecture.md) · [Documentation](README.md)
 
-## 模块
+## Scope and modules
+
+miocli is a client for one existing Mihomo controller. It owns connection settings and console state, not the external core's process or full runtime configuration. This avoids competing with existing clients for lifecycle and configuration ownership.
 
 ```text
 cmd/miocli
   └── internal/cli
         ├── internal/config
-        ├── internal/core
         ├── internal/mihomo
-        ├── internal/profile
-        └── internal/app
-              └── internal/theme
+        ├── internal/profiles → config
+        ├── internal/systemproxy → config
+        └── internal/app → mihomo, theme
 ```
 
-- `cmd/miocli` 处理进程信号和最终错误输出。
-- `internal/cli` 定义 Cobra 命令，解析运行配置并装配 TUI。
-- `internal/config` 选择配置文件、解析 YAML 和环境变量、校验地址与托管策略。
-- `internal/core` 发现、校验和启动托管内核；只清理本次启动的子进程。
-- `internal/mihomo` 实现控制 API HTTP 客户端、DTO 和错误分类，不依赖 TUI。
-- `internal/profile` 保存配置档案，执行来源更新、校验、热加载和事务恢复。
-- `internal/app` 使用 Bubble Tea Model 管理界面状态；`internal/theme` 提供终端样式。
+| Package | Responsibility |
+| --- | --- |
+| `cmd/miocli` | Process context/signals and final error output |
+| `internal/cli` | Cobra commands, terminal prompts, connection checks and TUI assembly |
+| `internal/config` | File selection, strict settings parsing, URL validation, private writes and read-only connection extraction |
+| `internal/mihomo` | HTTP transport, DTOs, domain interfaces, error classification and required-API probe |
+| `internal/profiles` | HTTPS YAML download, private storage, updates, effective profile activation and persistence |
+| `internal/app` | Bubble Tea state, resource navigation, polling, writes, latency workers and rendering |
+| `internal/systemproxy` | Platform proxy settings, private snapshots and restoration |
+| `internal/theme` | Styling, color policy, terminal-safe text and input styles |
 
-网络请求由 Bubble Tea 命令异步执行，结果通过有类型的消息更新 Model。UI 不直接构造 HTTP 请求或写档案 YAML。
+Source: [CLI](https://github.com/mayfly-tech/miocli/tree/main/internal/cli), [configuration](https://github.com/mayfly-tech/miocli/tree/main/internal/config), [API client](https://github.com/mayfly-tech/miocli/tree/main/internal/mihomo), [console](https://github.com/mayfly-tech/miocli/tree/main/internal/app). These are repository links, not source files bundled in release archives.
 
-## 配置和启动
+## Startup and state flow
 
-- 普通启动使用用户配置；`dev` 使用仓库本地 `config.local.yaml`；显式 `--config` 指定唯一配置文件。
-- 服务地址按 `--server`、非空 `MIOCLI_SERVER`、YAML、默认值的顺序解析；密钥按非空 `MIOCLI_SECRET`、YAML、空值的顺序解析。
-- `core.mode` 默认 `connect`。地址覆盖只对本次连接生效；`dev` 不管理内核。
-- `setup` 显式选择连接已有内核或托管内核。托管模式先确认副作用、验证配置并检查 API，再保存管理配置。
-- 已配置内核的连接错误不会触发自动安装或启动第二个实例。托管启动只在 API 连接被拒绝时启动子进程；退出时只停止自有子进程。
-- 只有本次启动的托管子进程拥有完整档案写权限。档案应用先记录受保护事务，执行一次热加载并读回状态；超时或读回失败时保留事务，不自动重放写请求。
+1. CLI resolves settings and probes `/version`, `/proxies`, `/configs`.
+2. On eligible first-run failures, interactive setup is offered; otherwise errors are returned.
+3. A terminal session creates the API client and Bubble Tea Model in an alternate screen.
+4. Bootstrap loads version/proxies/mode; providers and connections load independently.
+5. `tea.Cmd` performs network work asynchronously; typed messages update the Model.
+
+CLI commands are grouped by connection, profiles and system proxy. Profile activation owns preparation, reload and optional restart-file persistence in `internal/profiles`. The TUI separates message dispatch, navigation, polling, writes, latency workers and resource rendering within `internal/app`.
+
+The UI does not construct HTTP requests or rewrite source Mihomo YAML. [Configuration](configuration.md) is authoritative for file paths, precedence, import and transport rules.
+
+## Reads, writes and concurrency
+
+- Normal polling is scheduled every 5 seconds. Proxies and mode are read concurrently; providers and connections have separate loading/error state.
+- Proxy refresh failures preserve previous data. Transient proxy failures receive 1/2/4-second bounded retry scheduling; other failures pause automatic proxy refresh. Optional-resource errors are handled independently.
+- Node selection sends a write and rereads proxies; the selection handler compares the returned member with the requested member.
+- Mode changes send a write and reread the current mode. Success is confirmed only when readback matches the requested mode; mismatches and readback failures remain explicit.
+- Provider updates reread providers and start a proxy/connection refresh, including on uncertain write outcomes.
+- Generations/serials reject stale asynchronous results in the paths that track them. In-flight operation guards prevent conflicting writes; timed-out writes are not replayed.
+- Latency checks use at most 10 workers, cancellable contexts and provider-aware targets. Cancellation retains completed test results; new tests/writes can reset them.
+
+Resource browsing, confirmed group selections and actual active connection chains are separate state. The console does not infer real routing from the cursor. See [usage](usage.md) for the visible behavior and limitations.
 
 ## Mihomo API
 
-| 操作 | API |
+| Operation | Request and readback |
 | --- | --- |
-| 读取版本、代理组、模式 | `GET /version`、`GET /proxies`、`GET /configs` |
-| 切换 Selector 成员 | `PUT /proxies/{group}`，之后重读 `/proxies` |
-| 切换模式 | `PATCH /configs`，仅接受 `rule`、`global`、`direct`，之后重读 `/configs` |
-| 测试节点延迟 | `GET /proxies/{name}/delay` |
-| 读取/更新 providers | `GET /providers/proxies`、`PUT /providers/proxies/{name}` |
-| 读取活跃路由 | `GET /connections`，仅显示连接链路摘要 |
-| 应用配置档案 | `PUT /configs`，传入受控目录中的候选配置路径 |
+| Required connection probe | `GET /version`, `GET /proxies`, `GET /configs` |
+| Select a Selector member | `PUT /proxies/{group}` with `name`, then `GET /proxies` |
+| Change mode | `PATCH /configs` with `mode`, then `GET /configs` |
+| Global node latency | `GET /proxies/{name}/delay?url=…&timeout=…` |
+| Provider-only node latency | `GET /providers/proxies/{provider}/{name}/healthcheck?url=…&timeout=…` |
+| List providers | `GET /providers/proxies` |
+| Update provider | `PUT /providers/proxies/{name}`, then provider and proxy refresh |
+| Read runtime ports | `GET /configs` |
+| Reload a downloaded profile | `PUT /configs?force=true` with the local profile path |
+| Active-route summaries | `GET /connections`; only connection chains are presented |
 
-HTTP 仅允许 loopback；HTTPS 使用系统证书并验证主机名。HTTP 客户端不使用环境代理、不跟随重定向；响应体限制为 1 MiB。错误信息不包含响应正文。
+Resource path segments are escaped. Mode writes accept only `rule`, `global` and `direct`. Probe checks require Mihomo `meta: true` and a nonempty mode; optional APIs are not part of doctor's success criterion.
 
-## 测试
+Provider-only nodes use provider/name identity when absent from global proxies. Nodes are assembled from group members, remaining globals and provider entries; default ordering is not an unmodified server array.
 
-配置、CLI、core、profile 和 TUI 使用单元测试及 fake client；API 客户端使用 `httptest.Server`。可选 Mihomo 集成测试对隔离实例执行实际 API 操作。CI 还运行格式、静态检查、竞态测试、跨平台构建和安装器检查。
+## Transport and error handling
 
-更多测试说明见[开发指南](development.md)。
+HTTP is loopback-only. HTTPS uses system certificate trust, hostname verification and TLS 1.2 or newer. The controller client ignores environment proxies and refuses redirects. Dial timeout is 2 seconds, TLS handshake timeout 3 seconds, ordinary request timeout 5 seconds (120 seconds for profile reload), and body limit 1 MiB.
+
+Nonempty secrets use Bearer authentication. API errors distinguish authentication, not-found, timeout, network, decoding and other HTTP failures; response bodies are not included in error messages. This does not make all diagnostics safe to share: endpoints, paths and resource names can still be private.
+
+Installer downloads have a separate network policy. HTTPS and co-hosted SHA-256 are used; independent package signatures are not provided.
+
+## Boundaries and verification
+
+No production modules implement core lifecycle, TUN, full configuration merging, multi-controller state, traffic charts, log streaming or closing connections. Profile reload is limited to a local Mihomo controller and a downloaded YAML file readable by that core. System-proxy integration uses macOS `networksetup`, GNOME `gsettings`, and Windows current-user Internet Settings; original values are saved privately for restoration.
+
+Tests use fake clients and `httptest.Server` for configuration, endpoint encoding, errors, polling, stale messages, navigation and rendering. Optional integration tests exercise a disposable Mihomo instance; CI runs current and previous stable releases. Test containers are infrastructure, not a product feature.
+
+See [development](development.md) for tests and [releasing](releasing.md) for distribution. Compatibility policy does not promise every historical Mihomo version or every platform environment.

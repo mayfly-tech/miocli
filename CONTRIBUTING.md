@@ -1,15 +1,30 @@
-# 贡献指南
+# Contributing
 
-简体中文 · [English](CONTRIBUTING_EN.md) · [README](README.md)
+English · [简体中文](CONTRIBUTING.zh-CN.md) · [Documentation](docs/README.md)
 
-欢迎提交 Issue 和 Pull Request。较大的行为变更请先通过 Issue 讨论。
+Contributions to miocli are welcome. Keep changes focused, and discuss larger behavior changes in an issue before implementing them.
 
-## 开发环境
+## Report a problem or request a feature
 
-- Go 1.24 或更新版本。
-- 单元测试使用本地测试服务器和 fake client；只有手动运行 Mihomo 集成测试时才需要测试实例。
+Search existing issues first. Use the [bug report](https://github.com/mayfly-tech/miocli/issues/new?template=bug_report.yml) or [feature request](https://github.com/mayfly-tech/miocli/issues/new?template=feature_request.yml) form; blank issues are disabled.
 
-## 提交前检查
+For bugs, include:
+
+- miocli version (`miocli version`), or the target release if installation failed.
+- Mihomo version when available; otherwise state "unknown" or "not applicable".
+- OS, architecture, and terminal/version for UI problems.
+- Connection mode, minimal reproduction commands/keys, expected and actual behavior.
+- Relevant redacted diagnostics or screenshots, if useful.
+
+For features, explain the user problem, desired behavior and alternatives. Respect the [product boundary](README.md#what-it-does): miocli operates an existing controller, not its core lifecycle.
+
+Never post controller secrets, subscription URLs, private configuration (including storage settings), full configuration files or real traffic data. Inspect resource names and screenshots too.
+
+## Develop and validate
+
+Use Go 1.24 or newer. Unit tests use fake clients/local HTTP servers; they do not need a running Mihomo instance. Follow [development](docs/development.md) for local setup, targeted tests and optional Git hooks.
+
+For Go changes, run the relevant checks, expanding to the full set before submission as appropriate:
 
 ```sh
 gofmt -w $(find cmd internal -type f -name '*.go')
@@ -18,14 +33,31 @@ go test -race ./...
 go build -o /tmp/miocli ./cmd/miocli
 ```
 
-PR 请说明要解决的问题、行为变化和验证方式。行为变更需添加或更新测试。示例、测试、截图和日志中不得包含控制器密钥、私有配置或真实用户流量数据。
+The example assumes a POSIX shell; on Windows choose a suitable output path and format the changed Go files. Run integration tests **only against a dedicated disposable instance**, never your daily controller.
 
-保持改动聚焦。新增直接依赖需说明理由并确认许可证兼容。用户可见行为变化应同步更新 README 和相关指南。
+Add or update tests for behavior changes. API changes need `httptest.Server` coverage. New direct dependencies need a rationale and a compatible license.
 
-## 兼容性
+## Documentation changes
 
-发布目标为 Linux、macOS、Windows 的 amd64 和 arm64。CI 针对 Mihomo 当前稳定版及前一稳定版测试兼容性。API 行为变更需使用 `httptest.Server` 添加测试。
+English is the default. Update the complete Chinese counterpart in the same change:
 
-## 安全问题
+- `README.md` ↔ `README.zh-CN.md`.
+- `CONTRIBUTING.md` ↔ `CONTRIBUTING.zh-CN.md`.
+- `SECURITY.md` ↔ `SECURITY.zh-CN.md`.
+- `docs/*.md` ↔ `docs/zh-CN/*.md` for maintained guides.
 
-漏洞请通过 GitHub Security Advisories 私下报告。在修复发布前，请勿在公开 Issue 中披露可利用细节。
+Keep commands, conditions, defaults, warnings and links equivalent. Use real implementation/test evidence, not planned behavior. Preserve UI labels such as Groups and Selector. `CHANGELOG.md` remains release-please-generated and `LICENSE` is not translated.
+
+For documentation-only changes, check links, anchors, examples and bilingual coverage; Go tests may be marked not applicable. When moving pages, update templates and [release documentation packaging](docs/releasing.md#packages-and-assets), not just README links.
+
+## Submit a pull request
+
+Complete the PR template with the problem, changes and actual validation commands/results. Explain skipped or inapplicable checks. Link issues with `Closes #123` when appropriate; an issue is not required for every PR.
+
+Use [Conventional Commits](docs/development.md#commit-messages-and-hooks), for example `docs: clarify controller setup`. Do not include unrelated formatting or generated version changes.
+
+Release targets are Linux, macOS and Windows on amd64/arm64. CI tests current and previous stable Mihomo releases; this is a test strategy, not a guarantee for every historical core version. See [releasing](docs/releasing.md) for maintainer procedures.
+
+## Security reports
+
+Follow the [security policy](SECURITY.md) to report vulnerabilities privately.

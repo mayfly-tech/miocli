@@ -30,8 +30,6 @@ func (m *Model) View() string {
 	mode := strings.ToUpper(unknown(string(m.mode)))
 	connection := "Connected"
 	switch {
-	case m.profilePending:
-		connection = "Recovery pending"
 	case m.state == stateLoading:
 		connection = "Connecting"
 	case m.state == stateError:
@@ -45,7 +43,7 @@ func (m *Model) View() string {
 	switch connection {
 	case "Connecting":
 		connectionStyle = styles.Highlight
-	case "Recovery pending", "Stale", "Partial":
+	case "Stale", "Partial":
 		connectionStyle = styles.Warning
 	case "Disconnected":
 		connectionStyle = styles.Error
@@ -55,15 +53,12 @@ func (m *Model) View() string {
 		styles.Highlight.Render(mode)+"  "+connectionStyle.Render("● "+connection),
 		width,
 	)
-	nav := []string{"1 Subscriptions", "2 Groups", "3 Nodes", "4 Status"}
-	if width < 70 {
-		nav[0] = "1 Subs"
-	}
-	active := 1
+	nav := []string{"1 Groups", "2 Nodes", "3 Providers", "4 Status"}
+	active := 0
 	switch m.page {
-	case pageProfiles, pageProviders:
-		active = 0
 	case pageNodes:
+		active = 1
+	case pageProviders:
 		active = 2
 	case pageStatus:
 		active = 3
@@ -103,9 +98,6 @@ func (m *Model) View() string {
 		lines = append(lines, styles.Error.Render(line))
 	}
 	lines = append(lines, m.footerLines(styles)...)
-	if m.dialog != nil {
-		lines = m.dialogView(width, height, styles)
-	}
 	return fitScreen(lines, width, height)
 }
 
@@ -143,9 +135,6 @@ func (m *Model) scrolled(lines []string, width, height int) []string {
 func (m *Model) alertLines() []string {
 	width, _ := m.screenSize()
 	var errors []string
-	if m.profilePending {
-		errors = append(errors, "Recovery pending: quit and restart the owned core; writes blocked")
-	}
 	if m.lastError != "" {
 		errors = append(errors, m.lastError)
 	}
@@ -157,9 +146,6 @@ func (m *Model) alertLines() []string {
 	}
 	if (m.page == pageProviders || m.page == pageNodes) && m.providerErr != "" {
 		errors = append(errors, "Providers: "+m.providerErr)
-	}
-	if m.profileService != nil && m.profileErr != "" {
-		errors = append(errors, "Profiles: "+m.profileErr)
 	}
 	if len(errors) == 0 {
 		return nil
@@ -335,10 +321,8 @@ func (m *Model) tableView(width, height int, styles theme.Styles) []string {
 	headers := []string{"Name", "Protocol", "Source", "Delay"}
 	title := ""
 	switch m.page {
-	case pageProfiles:
-		title, headers = "Profiles · p Providers", []string{"Name", "Source", "State", "Updated"}
 	case pageProviders:
-		title, headers = "Providers · p Profiles", []string{"Name", "Source", "Nodes", "Updated"}
+		title, headers = "Providers", []string{"Name", "Source", "Nodes", "Updated"}
 	}
 	if m.search.Value() != "" {
 		title += " · /" + safeText(m.search.Value())
@@ -360,21 +344,19 @@ func (m *Model) tableView(width, height int, styles theme.Styles) []string {
 		switch {
 		case m.search.Value() != "" || m.filterType != "" || m.filterSource != "":
 			message = "No matches. Press Esc to clear filters"
-		case m.page == pageProfiles:
-			message = m.profileEmptyText()
 		case (m.page == pageProviders || m.page == pageNodes) && m.providerErr != "":
 			message = "Provider read failed. Press r to retry; 4 Status for details"
 		}
 		var header []string
-		if m.page == pageProfiles || m.page == pageProviders {
-			header = m.subscriptionHeader(width, styles)
+		if m.page == pageProviders {
+			header = m.providerHeader(width, styles)
 		}
 		return append(header,
 			append([]string{styles.Highlight.Render(ansi.Truncate(title, width, "…")), ""}, wrappedLines([]string{message}, width)...)...)
 	}
 	var header []string
-	if m.page == pageProfiles || m.page == pageProviders {
-		header = m.subscriptionHeader(width, styles)
+	if m.page == pageProviders {
+		header = m.providerHeader(width, styles)
 	}
 	height = max(1, height-len(header))
 	tableWidth := width
@@ -494,25 +476,15 @@ func (m *Model) keyHints() string {
 				return "Enter select  Space/T test  s/t/f filter/sort  ?"
 			}
 			return "Enter members  Space test  ? help"
-		case pageProfiles:
-			if m.runtime.Owned {
-				return "a add  Space activate  ? help"
-			}
-			return "p Providers  Enter details  ? help"
 		case pageProviders:
-			return "u update  p Profiles  ? help"
+			return "u update  Enter details  ? help"
 		default:
 			return "j/k scroll  ? help  q quit"
 		}
 	}
 	switch m.page {
-	case pageProfiles:
-		if !m.runtime.Owned {
-			return "p Providers  Enter details  ? help  q quit"
-		}
-		return "a add  e edit  u update  Space activate  d delete  ? help"
 	case pageProviders:
-		return "u update  p Profiles  Enter details  / search  ? help"
+		return "u update  Enter details  / search  ? help"
 	case pageNodes:
 		return "Space test  T test filtered  / search  ? help  q quit"
 	case pageGroups:
@@ -525,30 +497,14 @@ func (m *Model) keyHints() string {
 	}
 }
 
-func (m *Model) subscriptionHeader(width int, styles theme.Styles) []string {
-	section, summary := "PROFILES", ""
-	if m.page == pageProfiles {
-		active := 0
-		for _, entry := range m.profileIndex.Entries {
-			if entry.ID == m.profileIndex.Active {
-				active++
-			}
-		}
-		access := "Managed profiles unavailable"
-		if m.runtime.Owned {
-			access = "Managed profiles enabled"
-		}
-		summary = fmt.Sprintf("%d saved · %d active · %s", len(m.profileIndex.Entries), active, access)
-	} else {
-		section = "API PROVIDERS"
-		total := 0
-		for _, provider := range m.providers {
-			total += len(provider.Proxies)
-		}
-		summary = fmt.Sprintf("%d providers · %d nodes · updates are manual", len(m.providers), total)
+func (m *Model) providerHeader(width int, styles theme.Styles) []string {
+	total := 0
+	for _, provider := range m.providers {
+		total += len(provider.Proxies)
 	}
-	left := styles.Brand.Render("SUBSCRIPTIONS") + " " + styles.ActiveTab.Render(section)
-	right := styles.Muted.Render(summary) + "  " + styles.Tab.Render("p switch")
+	summary := fmt.Sprintf("%d providers · %d nodes · updates are manual", len(m.providers), total)
+	left := styles.Brand.Render("API PROVIDERS")
+	right := styles.Muted.Render(summary)
 	if width < 100 {
 		return []string{ansi.Truncate(left+"  "+right, width, "…")}
 	}
@@ -570,17 +526,12 @@ func (m *Model) statusView(width, height int, styles theme.Styles) []string {
 }
 
 func (m *Model) statusLines() []string {
-	owned := "No; full profile writes unavailable"
-	if m.runtime.Owned {
-		owned = "Yes; only this child is stopped on exit"
-	}
 	lines := []string{
 		"INSTANCE:",
 		"Controller: " + m.server,
 		"Mihomo version: " + unknown(m.version.Version),
 		"Proxy mode: " + strings.ToUpper(string(m.mode)),
-		"Core mode: " + unknown(m.runtime.CoreMode),
-		"Owned core: " + owned,
+		"Connection: existing controller; core lifecycle is external",
 		"Configuration: " + unknown(m.runtime.ConfigPath),
 		"Credentials: secret hidden",
 		"",
@@ -608,9 +559,6 @@ func (m *Model) statusLines() []string {
 	if m.refreshError != "" {
 		lines = append(lines, "Stale data: "+m.refreshError)
 	}
-	if m.profilePending {
-		lines = append(lines, "Profile recovery pending: quit and restart the owned core")
-	}
 	if m.modeError != "" {
 		lines = append(lines, "Mode error: "+m.modeError)
 	}
@@ -619,9 +567,6 @@ func (m *Model) statusLines() []string {
 	}
 	if m.connectionsError != "" {
 		lines = append(lines, "Connections error: "+m.connectionsError)
-	}
-	if m.profileErr != "" {
-		lines = append(lines, "Profiles: "+m.profileErr)
 	}
 	if m.notice != "" {
 		lines = append(lines, "Last result: "+m.notice)
@@ -635,35 +580,34 @@ func (m *Model) statusLines() []string {
 func (m *Model) failureLines() []string {
 	return []string{"Connection failed", "r retry · j/k scroll · ? help · q quit",
 		"Quit and run miocli doctor / miocli setup to check the connection.",
-		"No second core is installed or started automatically.", "", m.lastError}
+		"miocli never installs, starts or stops Mihomo cores.", "", m.lastError}
 }
 
 func (m *Model) helpLines() []string {
 	return []string{
 		"miocli · Help (? / Esc close)", "",
 		"Navigate",
-		"1 Subscriptions · 2 Groups · 3 Nodes · 4 Status",
+		"1 Groups · 2 Nodes · 3 Providers · 4 Status",
 		"Up/Down or j/k move · PgUp/PgDn page · g/G first/last",
 		"Groups: Tab focus group/member · Enter enter/select",
 		"v group/member details · Esc close details",
 		"Right/l enter nested group · Left/h or Esc return",
-		"Subscriptions: Enter or Tab details · Esc close",
+		"Nodes/Providers: Enter or Tab details · Esc close",
 		"/ search names · Enter keep filter · Esc clear",
 		": commands · m cycle Rule/Global/Direct · r refresh",
 		"? help · q / Ctrl+C quit · Esc at root does not quit", "",
 		"Actions",
-		"Profiles: a add · e edit · u refresh · Space activate · d delete",
-		"p switch Profiles / Providers · Providers: u update",
+		"Providers: u update and read back status",
 		"Nodes: Space test one · T test filtered · c cancel",
 		"s sort nodes · t protocol filter · f source filter",
 		"Groups: Space test direct nodes",
 		"* marks the confirmed member; > marks the cursor",
 		"Automatic groups cannot be selected manually", "",
 		"Commands (not a shell)",
-		"profiles | providers | groups | nodes (members) | status | help",
+		"groups | nodes | providers | status | help",
 		"refresh | mode rule|global|direct | quit", "",
-		"Full profiles require a managed child started by this run.",
-		"Sources stay read-only. Timed-out writes are not replayed.",
+		"Connect to an existing controller; core lifecycle is external.",
+		"Source configurations stay read-only. Timed-out writes are not replayed.",
 		"Connections show active routes, not the current cursor.",
 	}
 }

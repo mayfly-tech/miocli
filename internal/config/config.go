@@ -17,20 +17,10 @@ import (
 
 const DefaultServer = "http://127.0.0.1:9090"
 
-const (
-	Connect = "connect"
-	Managed = "managed"
-)
-
-type Core struct {
-	Mode   string `yaml:"mode"`
-	Binary string `yaml:"binary,omitempty"`
-}
-
 type Config struct {
-	Server string `yaml:"server"`
-	Secret string `yaml:"secret"`
-	Core   Core   `yaml:"core"`
+	Server            string `yaml:"server"`
+	Secret            string `yaml:"secret"`
+	ActiveProfilePath string `yaml:"active-profile-path,omitempty"`
 }
 
 type Resolved struct {
@@ -69,7 +59,7 @@ func Resolve(overrides Overrides) (Resolved, error) {
 		}
 	}
 
-	cfg := Config{Server: DefaultServer, Core: Core{Mode: Connect}}
+	cfg := Config{Server: DefaultServer}
 	result := Resolved{Path: path, ServerSource: "default", SecretSource: "not set"}
 	data, err := os.ReadFile(path)
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
@@ -81,9 +71,9 @@ func Resolve(overrides Overrides) (Resolved, error) {
 	if err == nil {
 		result.Exists = true
 		var fileConfig struct {
-			Server *string `yaml:"server"`
-			Secret *string `yaml:"secret"`
-			Core   Core    `yaml:"core"`
+			Server            *string `yaml:"server"`
+			Secret            *string `yaml:"secret"`
+			ActiveProfilePath string  `yaml:"active-profile-path"`
 		}
 		decoder := yaml.NewDecoder(strings.NewReader(string(data)))
 		decoder.KnownFields(true)
@@ -101,7 +91,7 @@ func Resolve(overrides Overrides) (Resolved, error) {
 		if fileConfig.Secret != nil {
 			cfg.Secret = *fileConfig.Secret
 		}
-		cfg.Core = fileConfig.Core
+		cfg.ActiveProfilePath = fileConfig.ActiveProfilePath
 		if cfg.Secret != "" {
 			result.SecretSource = path
 		}
@@ -119,16 +109,6 @@ func Resolve(overrides Overrides) (Resolved, error) {
 		cfg.Server = DefaultServer
 		result.ServerSource = "default"
 	}
-	if cfg.Core.Mode == "" {
-		cfg.Core.Mode = Connect
-	}
-	if cfg.Core.Mode != Connect && cfg.Core.Mode != Managed {
-		return Resolved{}, errors.New("core.mode must be connect or managed")
-	}
-	if cfg.Core.Mode == Connect && cfg.Core.Binary != "" {
-		return Resolved{}, errors.New("core.binary is only supported with core.mode: managed")
-	}
-
 	if value, ok := lookup("MIOCLI_SECRET"); ok && value != "" {
 		cfg.Secret = value
 		result.SecretSource = "MIOCLI_SECRET"
@@ -149,6 +129,9 @@ func Resolve(overrides Overrides) (Resolved, error) {
 		return Resolved{}, err
 	}
 	cfg.Server = server
+	if cfg.ActiveProfilePath != "" && (!filepath.IsAbs(cfg.ActiveProfilePath) || strings.ContainsRune(cfg.ActiveProfilePath, '\x00')) {
+		return Resolved{}, errors.New("active-profile-path must be an absolute path without NUL bytes")
+	}
 	result.Config = cfg
 	return result, nil
 }
@@ -218,6 +201,15 @@ func ValidateServer(raw string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("invalid server URL: %w", err)
 	}
+	if parsed.Scheme == "unix" {
+		if runtime.GOOS == "windows" || parsed.Host != "" || parsed.User != nil ||
+			parsed.RawQuery != "" || parsed.ForceQuery || parsed.Fragment != "" ||
+			parsed.Opaque != "" || !filepath.IsAbs(parsed.Path) || parsed.Path == "/" ||
+			strings.ContainsRune(parsed.Path, '\x00') || filepath.Clean(parsed.Path) != parsed.Path {
+			return "", errors.New("Unix controller requires an absolute normalized socket path without a host, query or fragment")
+		}
+		return (&url.URL{Scheme: "unix", Path: parsed.Path}).String(), nil
+	}
 	if parsed.Scheme != "http" && parsed.Scheme != "https" {
 		return "", errors.New("server URL scheme must be http or https")
 	}
@@ -242,6 +234,23 @@ func ValidateServer(raw string) (string, error) {
 }
 
 func isLoopbackHost(host string) bool {
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
+}
+
+// IsLocalController reports whether a controller refers to this host.
+func IsLocalController(server string) bool {
+	parsed, err := url.Parse(server)
+	if err != nil {
+		return false
+	}
+	if parsed.Scheme == "unix" {
+		return true
+	}
+	host := parsed.Hostname()
 	if strings.EqualFold(host, "localhost") {
 		return true
 	}

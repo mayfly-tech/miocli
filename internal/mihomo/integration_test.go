@@ -58,6 +58,8 @@ func TestMihomoIntegration(t *testing.T) {
 	}
 
 	testServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		// Mihomo rejects zero-millisecond results; loopback responses can otherwise round down to zero.
+		time.Sleep(10 * time.Millisecond)
 		w.WriteHeader(http.StatusNoContent)
 	}))
 	defer testServer.Close()
@@ -65,8 +67,8 @@ func TestMihomoIntegration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Delay(DIRECT) failed: %v", err)
 	}
-	if delay < 0 {
-		t.Fatalf("Delay() returned negative latency: %d", delay)
+	if delay <= 0 {
+		t.Fatalf("Delay() returned non-positive latency: %d", delay)
 	}
 	providers, err := client.Providers(ctx)
 	if err != nil || len(providers["MIOCLI-Provider"].Proxies) != 1 {
@@ -74,14 +76,6 @@ func TestMihomoIntegration(t *testing.T) {
 	}
 	if err := client.UpdateProvider(ctx, "MIOCLI-Provider"); err != nil {
 		t.Fatalf("UpdateProvider() failed: %v", err)
-	}
-	if path := os.Getenv("MIOCLI_INTEGRATION_CONFIG"); path != "" {
-		if err := client.Reload(ctx, path); err != nil {
-			t.Fatalf("Reload() failed: %v", err)
-		}
-		if mode, err := client.Mode(ctx); err != nil || mode != ModeRule {
-			t.Fatalf("reloaded mode = %q, %v", mode, err)
-		}
 	}
 }
 

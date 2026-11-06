@@ -33,7 +33,7 @@ func TestDevelopmentPathFindsOnlyProjectRoot(t *testing.T) {
 
 func TestResolvePolicyAndSources(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.yaml")
-	if err := os.WriteFile(path, []byte("server: http://127.0.0.1:19090\nsecret: file-secret\ncore:\n  mode: managed\n  binary: /chosen/mihomo\n"), 0600); err != nil {
+	if err := os.WriteFile(path, []byte("server: http://127.0.0.1:19090\nsecret: file-secret\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
 	cfg, err := Resolve(Overrides{ConfigPath: path, LookupEnv: func(key string) (string, bool) {
@@ -45,7 +45,7 @@ func TestResolvePolicyAndSources(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !cfg.Exists || !cfg.ExplicitServer || cfg.ServerSource != "MIOCLI_SERVER" || cfg.SecretSource != path || cfg.Secret != "file-secret" || cfg.Core.Mode != Managed {
+	if !cfg.Exists || !cfg.ExplicitServer || cfg.ServerSource != "MIOCLI_SERVER" || cfg.SecretSource != path || cfg.Secret != "file-secret" {
 		t.Fatalf("unexpected resolution: %#v", cfg)
 	}
 }
@@ -56,8 +56,7 @@ func TestLoadDefaultAndInvalidPolicies(t *testing.T) {
 		err  string
 	}{
 		{data: "server: http://127.0.0.1:9090\n"},
-		{data: "core:\n  mode: automatic\n", err: "core.mode"},
-		{data: "core:\n  mode: connect\n  binary: /chosen/mihomo\n", err: "core.binary"},
+		{data: "unknown: true\n", err: "field unknown"},
 		{data: "server: http://127.0.0.1:9090\n---\nsecret: other\n", err: "exactly one"},
 	} {
 		t.Run(test.data, func(t *testing.T) {
@@ -71,7 +70,7 @@ func TestLoadDefaultAndInvalidPolicies(t *testing.T) {
 				if err == nil || !strings.Contains(err.Error(), test.err) {
 					t.Fatalf("error = %v, want %s", err, test.err)
 				}
-			} else if err != nil || cfg.Core.Mode != Connect {
+			} else if err != nil || cfg.Server != DefaultServer {
 				t.Fatalf("default policy config = %#v, %v", cfg, err)
 			}
 		})
@@ -80,7 +79,7 @@ func TestLoadDefaultAndInvalidPolicies(t *testing.T) {
 
 func TestMissingFieldsKeepDefaultSources(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.yaml")
-	if err := os.WriteFile(path, []byte("core:\n  mode: connect\n"), 0600); err != nil {
+	if err := os.WriteFile(path, []byte("{}\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
 	cfg, err := Resolve(Overrides{ConfigPath: path, LookupEnv: func(string) (string, bool) { return "", false }})

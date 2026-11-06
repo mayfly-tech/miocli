@@ -11,6 +11,35 @@ import (
 	"time"
 )
 
+func TestReloadAllowsSlowInitialization(t *testing.T) {
+	client := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(requestTimeout + 200*time.Millisecond)
+		w.WriteHeader(http.StatusNoContent)
+	}, "")
+	if err := client.ReloadConfig(context.Background(), "/tmp/profile.yaml"); err != nil {
+		t.Fatalf("reload still uses ordinary request timeout: %v", err)
+	}
+	if client.client.Timeout != requestTimeout {
+		t.Fatal("reload changed timeouts for ordinary API requests")
+	}
+	if reloadTimeout != 120*time.Second {
+		t.Fatalf("reload timeout = %v", reloadTimeout)
+	}
+}
+
+func TestReloadRespectsCallerDeadline(t *testing.T) {
+	client := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(100 * time.Millisecond)
+		w.WriteHeader(http.StatusNoContent)
+	}, "")
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
+	defer cancel()
+	err := client.ReloadConfig(ctx, "/tmp/profile.yaml")
+	var apiErr *APIError
+	if !errors.As(err, &apiErr) || apiErr.Kind != ErrorTimeout {
+		t.Fatalf("reload caller deadline not respected: %v", err)
+	}
+}
 func newTestClient(t *testing.T, handler http.HandlerFunc, secret string) *HTTPClient {
 	t.Helper()
 	server := httptest.NewServer(handler)
@@ -132,6 +161,42 @@ func TestHTTPClientWriteRequests(t *testing.T) {
 	}
 	if err := client.SetMode(context.Background(), Mode("script")); err == nil {
 		t.Fatal("SetMode accepted unsupported mode")
+	}
+	if requests != 2 {
+		t.Fatalf("received %d requests, want 2", requests)
+	}
+}
+
+func TestHTTPClientRuntimeConfigAndReload(t *testing.T) {
+	requests := 0
+	client := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/configs":
+			_, _ = w.Write([]byte(`{"mode":"rule","port":7890,"socks-port":7891,"mixed-port":7892}`))
+		case r.Method == http.MethodPut && r.URL.Path == "/configs" && r.URL.Query().Get("force") == "true":
+			var body map[string]string
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Error(err)
+			}
+			if body["path"] != "/tmp/profile.yaml" {
+				t.Errorf("reload body = %#v", body)
+			}
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			t.Errorf("unexpected request %s %s", r.Method, r.URL.String())
+		}
+	}, "")
+
+	got, err := client.RuntimeConfig(context.Background())
+	if err != nil || got.Mode != ModeRule || got.Port != 7890 || got.SocksPort != 7891 || got.MixedPort != 7892 {
+		t.Fatalf("RuntimeConfig() = %#v, %v", got, err)
+	}
+	if err := client.ReloadConfig(context.Background(), "/tmp/profile.yaml"); err != nil {
+		t.Fatal(err)
+	}
+	if err := client.ReloadConfig(context.Background(), " "); err == nil {
+		t.Fatal("ReloadConfig accepted an empty path")
 	}
 	if requests != 2 {
 		t.Fatalf("received %d requests, want 2", requests)

@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -17,7 +18,6 @@ import (
 
 	"miocli/internal/app"
 	"miocli/internal/config"
-	"miocli/internal/core"
 )
 
 func isolatedConfig(t *testing.T) string {
@@ -49,13 +49,12 @@ func commandTest(t *testing.T, deps dependencies, args ...string) (string, error
 }
 
 func TestConnectionEntrypointsNeverManageCore(t *testing.T) {
-	for _, mode := range []string{"connect", "managed-override", "dev"} {
+	for _, mode := range []string{"connect", "address-override", "dev"} {
 		t.Run(mode, func(t *testing.T) {
 			path := isolatedConfig(t)
-			cfg := config.Config{Server: config.DefaultServer, Core: config.Core{Mode: config.Connect}}
+			cfg := config.Config{Server: config.DefaultServer}
 			args := []string{"--config", path}
-			if mode == "managed-override" {
-				cfg.Core.Mode = config.Managed
+			if mode == "address-override" {
 				t.Setenv("MIOCLI_SERVER", cfg.Server)
 			}
 			if mode == "dev" {
@@ -67,15 +66,11 @@ func TestConnectionEntrypointsNeverManageCore(t *testing.T) {
 			before, _ := os.ReadFile(path)
 			deps := defaultDependencies()
 			deps.terminal = func(*cobra.Command) bool { return true }
-			deps.start = func(context.Context, config.Config, core.Paths) (*core.Manager, error) {
-				t.Fatal("connect path started a core")
-				return nil, nil
-			}
 			deps.probe = func(context.Context, config.Config) error { return nil }
 			called := false
 			deps.ui = func(_ context.Context, _ config.Config, _ bool, runtime app.Runtime) error {
-				if runtime.Owned {
-					t.Fatal("connection mode acquired core ownership")
+				if runtime.ConfigPath != path {
+					t.Fatal("incorrect runtime configuration")
 				}
 				called = true
 				return nil
@@ -97,9 +92,9 @@ func TestConnectionEntrypointsNeverManageCore(t *testing.T) {
 	}
 }
 
-func TestDevReadsLocalFileAndRejectsManaged(t *testing.T) {
+func TestDevReadsLocalFileAndRejectsUnknownFields(t *testing.T) {
 	path := isolatedConfig(t)
-	if err := config.Save(path, config.Config{Server: "https://user.example", Core: config.Core{Mode: config.Managed}}); err != nil {
+	if err := config.Save(path, config.Config{Server: "https://user.example"}); err != nil {
 		t.Fatal(err)
 	}
 	dir := t.TempDir()
@@ -124,11 +119,11 @@ func TestDevReadsLocalFileAndRejectsManaged(t *testing.T) {
 	if _, err := commandTest(t, deps, "dev"); err != nil {
 		t.Fatal(err)
 	}
-	if err := config.Save(filepath.Join(dir, "config.local.yaml"), config.Config{Server: config.DefaultServer, Core: config.Core{Mode: config.Managed}}); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "config.local.yaml"), []byte("unknown-setting: true\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := commandTest(t, deps, "dev"); err == nil || !strings.Contains(err.Error(), "dev only connects") {
-		t.Fatalf("dev managed error = %v", err)
+	if _, err := commandTest(t, deps, "dev"); err == nil || !strings.Contains(err.Error(), "field unknown-setting not found") {
+		t.Fatalf("dev configuration error = %v", err)
 	}
 	if err := os.Remove(filepath.Join(dir, "config.local.yaml")); err != nil {
 		t.Fatal(err)
@@ -142,7 +137,7 @@ func TestSetupSavesEnteredValuesNotEnvironment(t *testing.T) {
 	path := isolatedConfig(t)
 	t.Setenv("MIOCLI_SERVER", "https://override.example")
 	t.Setenv("MIOCLI_SECRET", "environment-secret")
-	answers := []string{"1", "1", "http://127.0.0.1:19090", "entered-secret", "y"}
+	answers := []string{"1", "http://127.0.0.1:19090", "entered-secret", "y"}
 	deps := defaultDependencies()
 	deps.terminal = func(*cobra.Command) bool { return true }
 	deps.ask = func(_ *cobra.Command, label, initial string, secret bool) (string, error) {
@@ -170,7 +165,7 @@ func TestSetupSavesEnteredValuesNotEnvironment(t *testing.T) {
 		t.Fatal(err)
 	}
 	cfg, err := config.Load(config.Overrides{ConfigPath: path, LookupEnv: func(string) (string, bool) { return "", false }})
-	if err != nil || cfg.Secret != "entered-secret" || cfg.Core.Mode != config.Connect || len(answers) != 0 {
+	if err != nil || cfg.Secret != "entered-secret" || len(answers) != 0 {
 		t.Fatalf("saved config = %#v, %v, answers %v", cfg, err, answers)
 	}
 	if strings.Contains(output, "entered-secret") || strings.Contains(output, "environment-secret") {
@@ -195,17 +190,15 @@ func TestSetupNonInteractiveAndCancellationDoNotWrite(t *testing.T) {
 	}
 }
 
-func TestManagedDownloadDeclinedDoesNotInstallOrSave(t *testing.T) {
+func TestSetupImportsOnlyConnectionAndKeepsSourceReadOnly(t *testing.T) {
 	path := isolatedConfig(t)
 	dir := t.TempDir()
-	t.Setenv("PATH", filepath.Join(dir, "empty"))
-	t.Setenv("XDG_DATA_HOME", dir)
-	t.Setenv("LOCALAPPDATA", dir)
 	source := filepath.Join(dir, "source.yaml")
-	if err := os.WriteFile(source, []byte("mode: rule\n"), 0600); err != nil {
+	data := []byte("external-controller: 127.0.0.1:19090\nsecret: fixture-secret\nmode: rule\ntun:\n  enable: true\n")
+	if err := os.WriteFile(source, data, 0600); err != nil {
 		t.Fatal(err)
 	}
-	answers := []string{"2", "y", "http://127.0.0.1:19090", "1", source, "", "n", "c"}
+	answers := []string{"2", source, "http://127.0.0.1:19090", "fixture-secret", "y"}
 	deps := defaultDependencies()
 	deps.terminal = func(*cobra.Command) bool { return true }
 	deps.ask = func(_ *cobra.Command, label, _ string, _ bool) (string, error) {
@@ -216,37 +209,35 @@ func TestManagedDownloadDeclinedDoesNotInstallOrSave(t *testing.T) {
 		answers = answers[1:]
 		return answer, nil
 	}
-	if _, err := commandTest(t, deps, "setup"); !errors.Is(err, context.Canceled) {
-		t.Fatalf("decline error = %v", err)
+	deps.probe = func(_ context.Context, cfg config.Config) error {
+		if cfg.Server != "http://127.0.0.1:19090" || cfg.Secret != "fixture-secret" {
+			t.Fatal("import lost connection details")
+		}
+		return nil
 	}
-	if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
-		t.Fatal("declining download wrote app config")
+	output, err := commandTest(t, deps, "setup")
+	if err != nil || len(answers) != 0 || strings.Contains(output, "fixture-secret") {
+		t.Fatalf("setup = %q, %v, unused answers %v", output, err, answers)
 	}
-	paths, err := core.PathsFor(path)
-	if err != nil {
-		t.Fatal(err)
+	after, err := os.ReadFile(source)
+	if err != nil || !bytes.Equal(data, after) {
+		t.Fatal("setup changed source configuration")
 	}
-	if _, err := os.Stat(paths.BinaryDir); !errors.Is(err, os.ErrNotExist) {
-		t.Fatal("declining download created binary directory")
-	}
-	if len(answers) != 0 {
-		t.Fatalf("unused answers: %v", answers)
+	saved, err := os.ReadFile(path)
+	if err != nil || strings.Contains(string(saved), "tun:") || strings.Contains(string(saved), "mode:") || strings.Contains(string(saved), "core:") {
+		t.Fatalf("setup saved more than connection details: %v", err)
 	}
 }
 
-func TestExplicitServerFlagDisablesManagedStartup(t *testing.T) {
+func TestExplicitServerFlagOverridesConnection(t *testing.T) {
 	path := isolatedConfig(t)
-	if err := config.Save(path, config.Config{Server: config.DefaultServer, Core: config.Core{Mode: config.Managed}}); err != nil {
+	if err := config.Save(path, config.Config{Server: config.DefaultServer}); err != nil {
 		t.Fatal(err)
 	}
 	deps := defaultDependencies()
 	deps.terminal = func(*cobra.Command) bool { return true }
-	deps.start = func(context.Context, config.Config, core.Paths) (*core.Manager, error) {
-		t.Fatal("explicit address started managed core")
-		return nil, nil
-	}
 	deps.probe = func(_ context.Context, cfg config.Config) error {
-		if cfg.Server != "http://127.0.0.1:19090" || cfg.Core.Mode != config.Connect {
+		if cfg.Server != "http://127.0.0.1:19090" {
 			t.Fatalf("effective override = %#v", cfg)
 		}
 		return nil
@@ -259,14 +250,10 @@ func TestExplicitServerFlagDisablesManagedStartup(t *testing.T) {
 
 func TestDoctorIsReadOnlyAndRedacted(t *testing.T) {
 	path := isolatedConfig(t)
-	if err := config.Save(path, config.Config{Server: config.DefaultServer, Secret: "never-print-me", Core: config.Core{Mode: config.Connect}}); err != nil {
+	if err := config.Save(path, config.Config{Server: config.DefaultServer, Secret: "never-print-me"}); err != nil {
 		t.Fatal(err)
 	}
 	deps := defaultDependencies()
-	deps.start = func(context.Context, config.Config, core.Paths) (*core.Manager, error) {
-		t.Fatal("doctor started a core")
-		return nil, nil
-	}
 	deps.ui = func(context.Context, config.Config, bool, app.Runtime) error {
 		t.Fatal("doctor entered TUI")
 		return nil
@@ -277,7 +264,7 @@ func TestDoctorIsReadOnlyAndRedacted(t *testing.T) {
 	if err != nil || !strings.Contains(output, "source:") || strings.Contains(output, "never-print-me") {
 		t.Fatalf("doctor = %s, %v", output, err)
 	}
-	for _, section := range []string{"Configuration", "Core", "Controller", "OK: /version"} {
+	for _, section := range []string{"Configuration", "Controller", "OK: /version"} {
 		if !strings.Contains(output, section) {
 			t.Fatalf("doctor lacks section %q", section)
 		}
@@ -330,6 +317,63 @@ func TestProbeUsesOnlyRequiredReadAPIs(t *testing.T) {
 				t.Fatalf("probe paths = %v", paths)
 			}
 		})
+	}
+}
+
+func TestProfileUseReloadsOnlyLocalController(t *testing.T) {
+	path := isolatedConfig(t)
+	profileDir := filepath.Join(filepath.Dir(path), "profiles")
+	if err := os.MkdirAll(profileDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	profilePath := filepath.Join(profileDir, "home.yaml")
+	if err := os.WriteFile(profilePath, []byte("mode: rule\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(profileDir, "profiles.yaml"), []byte("- name: home\n  url: https://subscriptions.example/home\n  updated-at: 2026-01-01T00:00:00Z\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPut || r.URL.Path != "/configs" || r.URL.Query().Get("force") != "true" {
+			t.Errorf("reload request = %s %s", r.Method, r.URL.String())
+		}
+		var body map[string]string
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Error(err)
+		}
+		if filepath.Dir(body["path"]) != profileDir || body["path"] == profilePath {
+			t.Errorf("reload must use a separate effective profile: %q", body["path"])
+		}
+		data, err := os.ReadFile(body["path"])
+		if err != nil || !strings.Contains(string(data), "external-controller:") {
+			t.Errorf("effective profile missing controller: %q, %v", data, err)
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+	if err := config.Save(path, config.Config{Server: server.URL}); err != nil {
+		t.Fatal(err)
+	}
+	output, err := commandTest(t, defaultDependencies(), "--config", path, "profile", "use", "home")
+	if err != nil || !strings.Contains(output, "reload requested") {
+		t.Fatalf("profile use = %q, %v", output, err)
+	}
+
+	if err := config.Save(path, config.Config{Server: "https://controller.example"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := commandTest(t, defaultDependencies(), "--config", path, "profile", "use", "home"); err == nil || !strings.Contains(err.Error(), "local Mihomo controller") {
+		t.Fatalf("remote profile use error = %v", err)
+	}
+}
+
+func TestSystemProxyRejectsRemoteControllerBeforeReadingRuntime(t *testing.T) {
+	path := isolatedConfig(t)
+	if err := config.Save(path, config.Config{Server: "https://controller.example"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := commandTest(t, defaultDependencies(), "--config", path, "system-proxy", "enable"); err == nil || !strings.Contains(err.Error(), "local Mihomo controller") {
+		t.Fatalf("remote system proxy error = %v", err)
 	}
 }
 

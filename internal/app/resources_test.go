@@ -7,6 +7,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+
 	"miocli/internal/mihomo"
 )
 
@@ -36,13 +37,17 @@ func TestResourceNavigationSearchAndCommands(t *testing.T) {
 	if m.page != pageStatus || m.commanding {
 		t.Fatal("resource command failed")
 	}
-	key(m, "2")
+	key(m, "1")
 	if m.page != pageGroups {
 		t.Fatal("Groups shortcut did not navigate")
 	}
-	key(m, "3")
+	key(m, "2")
 	if m.page != pageNodes {
 		t.Fatal("Nodes shortcut did not navigate")
+	}
+	key(m, "3")
+	if m.page != pageProviders {
+		t.Fatal("Providers shortcut did not navigate")
 	}
 	key(m, "4")
 	if m.page != pageStatus {
@@ -145,7 +150,7 @@ func TestGroupsSearchAndSelectionSurviveRefresh(t *testing.T) {
 	}
 }
 
-func TestHelpAndDialogOwnKeyboardFocus(t *testing.T) {
+func TestHelpOwnsKeyboardFocus(t *testing.T) {
 	m := newReadyModel(t, newFakeClient())
 	key(m, "?")
 	key(m, "m")
@@ -153,24 +158,11 @@ func TestHelpAndDialogOwnKeyboardFocus(t *testing.T) {
 		t.Fatal("help leaked mode key to backend")
 	}
 	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyEsc})
-	m.dialog = &profileDialog{action: "delete", confirming: true}
-	key(m, "m")
-	if m.operation != "" {
-		t.Fatal("confirmation leaked key to backend")
-	}
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	if m.dialog != nil || m.operation != "" {
-		t.Fatal("default confirmation was destructive")
-	}
-	m.profilePending = true
-	if cmd := key(m, "m"); cmd != nil || m.operation != "" {
-		t.Fatal("pending transaction allowed writes")
-	}
 }
 
 func TestViewFitsWindowAndRetainsNoColorLayout(t *testing.T) {
 	for _, size := range [][2]int{{120, 40}, {100, 30}, {80, 24}, {60, 20}, {40, 12}, {10, 4}} {
-		for _, page := range []resourcePage{pageGroups, pageProfiles, pageProviders, pageNodes, pageStatus} {
+		for _, page := range []resourcePage{pageGroups, pageProviders, pageNodes, pageStatus} {
 			m := newReadyModel(t, newFakeClient())
 			m.width, m.height = size[0], size[1]
 			m.page = page
@@ -206,10 +198,9 @@ func TestUnsafeTerminalCharactersAndStaleResults(t *testing.T) {
 
 func TestPollingDoesNotEraseWriteErrorsOrDuplicateTimers(t *testing.T) {
 	m := newReadyModel(t, newFakeClient())
-	m.lastError = "配置加载结果未确认"
-	m.profilePending = true
+	m.lastError = "Provider update unconfirmed"
 	_, _ = m.Update(refreshMsg{proxies: m.proxies, mode: m.mode})
-	if m.lastError != "配置加载结果未确认" {
+	if m.lastError != "Provider update unconfirmed" {
 		t.Fatal("read success erased write error")
 	}
 	oldSerial := m.pollSerial
@@ -218,8 +209,8 @@ func TestPollingDoesNotEraseWriteErrorsOrDuplicateTimers(t *testing.T) {
 	if cmd != nil || m.polling {
 		t.Fatal("superseded timer issued another poll")
 	}
-	if !strings.Contains(m.View(), "Recovery pending") {
-		t.Fatal("pending transaction warning is invisible")
+	if !strings.Contains(m.View(), "Provider update unconfirmed") {
+		t.Fatal("unconfirmed write warning is invisible")
 	}
 }
 
@@ -248,7 +239,7 @@ func TestCancelLatencyKeepsCompletedResultsAndRejectsLateMessages(t *testing.T) 
 	if task.Err() == nil || m.ctx.Err() != nil || m.latency["Node A"].delay != 12 || m.latencyStop != nil {
 		t.Fatal("cancellation lost results or stopped application")
 	}
-	_, _ = m.Update(latencyResultMsg{id: 5, ok: true, result: delayResult{name: "Node B", delay: 99}})
+	_, _ = m.Update(latencyResultMsg{id: 5, result: delayResult{name: "Node B", delay: 99}})
 	if _, exists := m.latency["Node B"]; exists {
 		t.Fatal("late canceled result was applied")
 	}

@@ -1,0 +1,30 @@
+#!/bin/sh
+
+if [ "$#" -ne 1 ] || [ ! -r "$1" ]; then
+    echo "commit-msg: expected a readable commit message file" >&2
+    exit 1
+fi
+
+header=$(sed -n '1p' "$1")
+
+case "$header" in
+    "Merge "*|"Revert \""*|"fixup! "*|"squash! "*)
+        exit 0
+        ;;
+esac
+
+if printf '%s\n' "$header" |
+    grep -Eq '^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(\([[:alnum:]][[:alnum:]./_-]*\))?(!)?: [^[:space:]].*'
+then
+    exit 0
+fi
+
+cat >&2 <<'EOF'
+commit-msg: invalid commit message.
+Use Conventional Commits: type(scope)!: subject
+Allowed types: feat, fix, docs, style, refactor, perf, test, build, ci, chore, revert.
+Examples:
+  feat(cli): add profile command
+  fix!: handle missing configuration
+EOF
+exit 1

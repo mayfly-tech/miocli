@@ -11,6 +11,8 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -19,6 +21,7 @@ import (
 const (
 	maxResponseBytes = 1 << 20
 	requestTimeout   = 5 * time.Second
+	reloadTimeout    = 120 * time.Second
 )
 
 type HTTPClient struct {
@@ -31,6 +34,17 @@ func NewHTTPClient(server, secret string) (*HTTPClient, error) {
 	base, err := url.Parse(server)
 	if err != nil {
 		return nil, fmt.Errorf("parse Mihomo server URL: %w", err)
+	}
+	unixSocket := ""
+	if base.Scheme == "unix" {
+		if runtime.GOOS == "windows" || base.Host != "" || base.User != nil ||
+			base.RawQuery != "" || base.ForceQuery || base.Fragment != "" || base.Opaque != "" ||
+			!filepath.IsAbs(base.Path) || base.Path == "/" ||
+			strings.ContainsRune(base.Path, '\x00') || filepath.Clean(base.Path) != base.Path {
+			return nil, errors.New("Unix controller requires an absolute normalized socket path without a host, query or fragment")
+		}
+		unixSocket = base.Path
+		base = &url.URL{Scheme: "http", Host: "localhost"}
 	}
 	if base.Scheme != "http" && base.Scheme != "https" {
 		return nil, errors.New("Mihomo server URL scheme must be http or https")
@@ -64,6 +78,11 @@ func NewHTTPClient(server, secret string) (*HTTPClient, error) {
 		MaxIdleConnsPerHost: 2,
 		IdleConnTimeout:     30 * time.Second,
 		TLSClientConfig:     &tls.Config{MinVersion: tls.VersionTLS12},
+	}
+	if unixSocket != "" {
+		transport.DialContext = func(ctx context.Context, _, _ string) (net.Conn, error) {
+			return (&net.Dialer{Timeout: 2 * time.Second}).DialContext(ctx, "unix", unixSocket)
+		}
 	}
 	client := &http.Client{
 		Transport: transport,
@@ -120,6 +139,29 @@ func (c *HTTPClient) Mode(ctx context.Context) (Mode, error) {
 	return Mode(strings.ToLower(response.Mode)), nil
 }
 
+func (c *HTTPClient) RuntimeConfig(ctx context.Context) (RuntimeConfig, error) {
+	var runtimeConfig RuntimeConfig
+	if err := c.doJSON(ctx, http.MethodGet, "/configs", nil, &runtimeConfig); err != nil {
+		return RuntimeConfig{}, err
+	}
+	if runtimeConfig.Mode == "" {
+		return RuntimeConfig{}, &APIError{Kind: ErrorDecode, Op: "decode configs", Err: errors.New("missing mode")}
+	}
+	return runtimeConfig, nil
+}
+
+func (c *HTTPClient) ReloadConfig(ctx context.Context, path string) error {
+	if strings.TrimSpace(path) == "" {
+		return errors.New("Mihomo configuration path must not be empty")
+	}
+	// Reload can synchronously initialize providers and download Geo databases.
+	client := *c.client
+	client.Timeout = reloadTimeout
+	reloader := *c
+	reloader.client = &client
+	return reloader.doJSON(ctx, http.MethodPut, "/configs?force=true", map[string]string{"path": path}, nil)
+}
+
 func (c *HTTPClient) Select(ctx context.Context, group, name string) error {
 	return c.doJSON(ctx, http.MethodPut, "/proxies/"+url.PathEscape(group), map[string]string{"name": name}, nil)
 }
@@ -150,10 +192,6 @@ func (c *HTTPClient) Providers(ctx context.Context) (map[string]Provider, error)
 
 func (c *HTTPClient) UpdateProvider(ctx context.Context, name string) error {
 	return c.doJSON(ctx, http.MethodPut, "/providers/proxies/"+url.PathEscape(name), nil, nil)
-}
-
-func (c *HTTPClient) Reload(ctx context.Context, path string) error {
-	return c.doJSON(ctx, http.MethodPut, "/configs", map[string]string{"path": path}, nil)
 }
 
 func (c *HTTPClient) Connections(ctx context.Context) ([]Connection, error) {
